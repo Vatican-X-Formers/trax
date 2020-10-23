@@ -352,6 +352,17 @@ def FunnelTransformer(input_vocab_size,
                     mode, ff_activation)
       for i in range(n_encoder_layers)]
 
+      """
+      With this particular pool-query-only design in place, we find the simplest strided mean pooling
+      applied to each sliding window of the sequence work very well in practice. For simplicity, we only
+      experiment with stride 2 and window size 2 in this work.
+      """   
+  encoder_downsampling = [
+      tl.AvgPool(pool_size=2, strides=2)
+      for i in range(n_encoder_layers-1)
+  ]
+
+ # TODO: glue
   encoder = tl.Serial(
       in_encoder,
       encoder_blocks,
