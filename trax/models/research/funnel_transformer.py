@@ -8,9 +8,9 @@ from trax import layers as tl
 # h' <- Pooling(h)
 # na inpucie jest tupla (activations B x L x D, mask B x 1 x 1 x L)
 # na outpucie jest (activations' , mask') tyle, że mniejsze
-def _FunnelBlock(d_model, d_ff, n_heads,
-                 dropout, dropout_shared_axes, 
-                 mode, ff_activation,
+def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
+                 dropout=0.1, dropout_shared_axes=None, 
+                 mode='train', ff_activation=tl.Relu,
                  pool_size=(2,),
                  strides=(2,),
                  padding='VALID'
