@@ -27,11 +27,11 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
                 strides=strides,
                 padding=padding),# => Q := efekt max poolingu, K, V = stary ziom == activations, MASK    
         tl.Dup(), # h', h', h, h, m
-        tl.Parallel(
-            None,
-            attention # stack semantic => tutaj wejdzie q,k,v, mask
-                      # czyli po tym mamy activations, mask
-        ), # po nim mamy h', atencja(...), mask
-        tl.Add(), # h'+atencja(...), mask    
-        tl.LayerNorm() # funnel_activations, mask
+        # tl.Parallel(
+        #     None,
+        #     attention # stack semantic => tutaj wejdzie q,k,v, mask
+        #               # czyli po tym mamy activations, mask
+        # ), # po nim mamy h', atencja(...), mask
+        # tl.Add(), # h'+atencja(...), mask    
+        # tl.LayerNorm() # funnel_activations, mask
     )
