@@ -49,9 +49,8 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
         d_feature=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
     
     return tl.Serial(
-        tl.Branch(
-            tl.Dup(), tl.Dup()
-        ) # => h, h, mask
+        tl.Dup(), # h, h, mask
+        tl.Dup(), # h, h, h, mask
         tl.AvgPool(pool_size=pool_size, 
                 strides=strides,
                 padding=padding),# q,k,v,masks=h',h,h,mask
@@ -63,3 +62,9 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
         tl.Add(), # h'+attention(...), mask    
         tl.LayerNorm() # funnel_activations, mask
     )
+
+def _FunnelEncoderBlock():
+    pass
+
+def _FunnelEncoder():
+    pass
