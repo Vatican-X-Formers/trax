@@ -4,14 +4,15 @@ Funnel-Transformer: Filtering out Sequential Redundancy for Efficient Language P
 https://arxiv.org/abs/2006.03236
 """
 from trax import layers as tl
-
+from typing import List
 
 def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
                  dropout=0.1, dropout_shared_axes=None, 
                  mode='train', ff_activation=tl.Relu,
                  pool_size=(2,),
                  strides=(2,),
-                 padding='VALID'
+                 padding='VALID',
+                 pool_layer=tl.AvgPool
                  ):
     """Internal funnel block. On input it takes (activations, masks).
 
@@ -51,7 +52,7 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
     return tl.Serial(
         tl.Dup(), # h, h, mask
         tl.Dup(), # h, h, h, mask
-        tl.AvgPool(pool_size=pool_size, 
+        pool_layer(pool_size=pool_size, 
                 strides=strides,
                 padding=padding),# q,k,v,masks=h',h,h,mask
         tl.Dup(), # h', h', h, h, m
@@ -61,10 +62,78 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
         ), # h', attention(...), mask
         tl.Add(), # h'+attention(...), mask    
         tl.LayerNorm() # funnel_activations, mask
+        #TODO(mvxxx) fc
     )
 
-def _FunnelEncoderBlock():
+
+def _FunnelDecoder():
     pass
 
-def _FunnelEncoder():
+def _FunnelEncoder(input_vocab_size,
+                encoder_segment_lenghts=[4, 3, 3],
+                output_vocab_size=None,
+                d_model=512, #start
+                d_ff=2048,
+                n_heads=8,
+                max_len=2048,
+                dropout=0.1,
+                dropout_shared_axes=None,
+                mode='train',
+                ff_activation=tl.Relu,
+                pool_layer=tl.AvgPool,
+                pool_size=(2,),
+                strides=(2,)):
+
+  """Returns a Funnel Encoder.
+  """
+  def Embedder(vocab_size):  # tokens --> vectors
+    return [
+        tl.Embedding(vocab_size, d_model),
+        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
+    ]
+  funnels=len(encoder_block_lenghts)-1
+  f,s = pool_size[0], strides[0]
+  assert(funnels>=0)
+
+  def funnel_size_generator(init, f, s, n):
+      def generator():
+        _val = init
+        for _ in range(n):
+            yield _val
+            _val = (_val - f)/s + 1
+
+  dim_generator = funnel_size_generator(d_model, f, s, funnels)
+  funnel_dims = list(dim_generator() for _ in range(funnels))
+
+  in_embedder = Embedder(input_vocab_size)
+
+  # Positional encodings are not shared between encoder and decoder.
+  # Since encoder doesn't run stepwise, we do not use predict mode there.
+  encoder_mode = 'eval' if mode == 'predict' else mode
+  in_encoder = in_embedder + [
+      tl.PositionalEncoding(max_len=max_len, mode=encoder_mode)
+  ]
+
+
+  if output_vocab_size is None:
+    output_vocab_size = input_vocab_size
+
+  encoder_blocks = []
+  n_encoder_segments = len(encoder_segment_lenghts)
+  for i in range(n_encoder_segments):
+
+      for _ in range(encoder_segment_lenghts[i]):
+        encoder_blocks.append(_EncoderBlock(funnel_dims[i], d_ff, n_heads, dropout, dropout_shared_axes,
+                        mode, ff_activation))
+
+      if i != n_encoder_segments-1:
+          encoder_blocks.append(_FunnelBlock(funnel_dims[i], pool_layer=pool_layer))
+
+  encoder = tl.Serial(
+      in_encoder,
+      encoder_blocks,
+      tl.LayerNorm()
+  )
+
+def FunnelTransformer():
     pass
