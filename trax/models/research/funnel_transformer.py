@@ -16,7 +16,7 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
                  padding='VALID'
                  ):
     attention = tl.AttentionQKV(
-        d_features=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
+        d_feature=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
     
     # pierwszego zioma skopiowac 3 razy x,y,z = activ, activ, activations
     # 
