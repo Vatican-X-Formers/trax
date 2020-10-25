@@ -31,7 +31,7 @@ def _FunnelBlock(d_model, d_ff, n_heads,
             None,
             attention # stack semantic => tutaj wejdzie q,k,v, mask
                       # czyli po tym mamy activations, mask
-        ) # po nim mamy h', atencja(...), mask
+        ), # po nim mamy h', atencja(...), mask
         tl.Add(), # h'+atencja(...), mask    
         tl.LayerNorm() # funnel_activations, mask
     )
