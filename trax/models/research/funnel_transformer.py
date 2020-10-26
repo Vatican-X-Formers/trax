@@ -98,17 +98,6 @@ def _FunnelEncoder(vocab_size,
   f,s = pool_size[0], strides[0]
   assert(funnels>=0)
 
-  def funnel_size_generator(init, f, s, n):
-      def generator():
-        _val = init
-        for _ in range(n):
-            yield _val
-            _val = int((_val - f)/s + 1)
-      return generator
-
-  dim_generator = funnel_size_generator(d_model, f, s, segments)
-  funnel_dims = list(dim_generator())
-
   positional_encoder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
@@ -121,12 +110,12 @@ def _FunnelEncoder(vocab_size,
       # Building i'th segment
       for _ in range(encoder_segment_lenghts[i]):
         # segment_size encoder blocks
-        encoder_blocks.append(_EncoderBlock(funnel_dims[i], d_ff, n_heads, dropout, dropout_shared_axes,
+        encoder_blocks.append(_EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
                         mode, ff_activation))
 
       # if not last segment, add funnel block
       if i != n_encoder_segments-1:
-          encoder_blocks.append(_FunnelBlock(funnel_dims[i], pool_layer=pool_layer))
+          encoder_blocks.append(_FunnelBlock(d_model, pool_layer=pool_layer))
 
   # Assemble and return the model.
   return tl.Serial(                               # toks
