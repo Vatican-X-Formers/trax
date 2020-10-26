@@ -4,9 +4,17 @@ Funnel-Transformer: Filtering out Sequential Redundancy for Efficient Language P
 https://arxiv.org/abs/2006.03236
 """
 from trax import layers as tl
-from typing import List
-from trax import shapes
 from trax.models.transformer import _EncoderBlock
+import numpy as np
+
+def _InternalMaxPool(arr):
+    shape = arr.shape
+    np.reshape(arr, (*shape[:-1],int(shape[-1]/2), 2))
+    arr=np.max(arr, axis=-1, keepdims=False)
+    return arr
+
+
+
 
 def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
                  dropout=0.1, dropout_shared_axes=None, 
@@ -51,25 +59,29 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
     attention = tl.AttentionQKV(
         d_feature=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
     
-    return tl.Serial(
-        tl.Dup(), # h, h, mask
-        tl.Dup(), # h, h, h, mask
-        pool_layer(pool_size=pool_size, 
+    return tl.Serial( # h, mask
+        tl.Parallel(
+            None,
+            tl.Fn('max pool experiment', lambda x: _InternalMaxPool),
+        ), # h, mask'
+        tl.Dup(), # h, h, mask'
+        tl.Dup(), # h, h, h, mask'
+        pool_layer(pool_size=pool_size,
                 strides=strides,
-                padding=padding),# q,k,v,masks=h',h,h,mask
-        tl.Dup(), # h', h', h, h, m
+                padding=padding),# q,k,v,masks=h',h,h,mask'
+        tl.Dup(), # h', h', h, h, mask'
         tl.Parallel(
             None,
             attention
-        ), # h', attention(...), mask
-        tl.Add(), # h'+attention(...), mask    
-        tl.LayerNorm() # funnel_activations, mask
+        ), # h', attention(...), mask'
+        tl.Add(), # h'+attention(...), mask'
+        tl.LayerNorm() # funnel_activations, mask'
         #TODO(mvxxx) fc
     )
 
 
 def _FunnelDecoder():
-    pass
+  pass
 
 def _FunnelEncoder(vocab_size,
                 encoder_segment_lenghts,
@@ -88,14 +100,8 @@ def _FunnelEncoder(vocab_size,
 
   """Returns a Funnel Encoder.
   """
-  def Embedder(vocab_size):  # tokens --> vectors
-    return [
-        tl.Embedding(vocab_size, d_model),
-        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
-    ]
   segments = len(encoder_segment_lenghts)
   funnels = segments-1
-  f,s = pool_size[0], strides[0]
   assert(funnels>=0)
 
   positional_encoder = [
@@ -133,4 +139,4 @@ def _FunnelEncoder(vocab_size,
   )
 
 def FunnelTransformer():
-    pass
+  pass
