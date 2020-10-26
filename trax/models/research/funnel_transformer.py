@@ -4,7 +4,7 @@ Funnel-Transformer: Filtering out Sequential Redundancy for Efficient Language P
 https://arxiv.org/abs/2006.03236
 """
 from trax import layers as tl
-from trax.models.transformer import _EncoderBlock
+from trax.models.transformer import _EncoderBlock, _FeedForwardBlock
 import numpy as np
 
 def _InternalMaxPool(arr):
@@ -56,7 +56,8 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
     """
     attention = tl.AttentionQKV(
         d_feature=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
-    
+    feed_forward = _FeedForwardBlock(
+      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
     return tl.Serial( # h, mask
         tl.Dup(), # h, h, mask
         tl.Dup(), # h, h, h, mask
@@ -74,9 +75,8 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
             None,
             tl.Fn('max pool experiment', lambda x: _InternalMaxPool(x)),
         ), # funnel_activations, mask'
-        #TODO(mvxxx) fc
+        feed_forward
     )
-
 
 def _FunnelDecoder():
   pass
@@ -135,6 +135,9 @@ def _FunnelEncoder(vocab_size,
       tl.Dense(n_classes),                        # vecs
       tl.LogSoftmax(),                            # vecs
   )
+
+
+
 
 def FunnelTransformer():
   pass
