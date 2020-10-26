@@ -5,6 +5,7 @@ https://arxiv.org/abs/2006.03236
 """
 from trax import layers as tl
 from typing import List
+from trax import shapes
 from trax.models.transformer import _EncoderBlock
 
 def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
@@ -70,10 +71,10 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
 def _FunnelDecoder():
     pass
 
-def _FunnelEncoder(input_vocab_size,
+def _FunnelEncoder(vocab_size,
                 encoder_segment_lenghts,
-                output_vocab_size=None,
-                d_model=512, #start
+                n_classes=10,
+                d_model=512, # start
                 d_ff=2048,
                 n_heads=8,
                 max_len=2048,
@@ -107,18 +108,11 @@ def _FunnelEncoder(input_vocab_size,
 
   dim_generator = funnel_size_generator(d_model, f, s, segments)
   funnel_dims = list(dim_generator())
-  in_embedder = Embedder(input_vocab_size)
 
-  # Positional encodings are not shared between encoder and decoder.
-  # Since encoder doesn't run stepwise, we do not use predict mode there.
-  encoder_mode = 'eval' if mode == 'predict' else mode
-  in_encoder = in_embedder + [
-      tl.PositionalEncoding(max_len=max_len, mode=encoder_mode)
-  ]
-
-
-  if output_vocab_size is None:
-    output_vocab_size = input_vocab_size
+  positional_encoder = [
+      tl.Embedding(vocab_size, d_model),
+      tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
+      tl.PositionalEncoding(max_len=max_len)]
 
   encoder_blocks = []
   n_encoder_segments = len(encoder_segment_lenghts)
@@ -134,10 +128,19 @@ def _FunnelEncoder(input_vocab_size,
       if i != n_encoder_segments-1:
           encoder_blocks.append(_FunnelBlock(funnel_dims[i], pool_layer=pool_layer))
 
-  encoder = tl.Serial(
-      in_encoder,
-      encoder_blocks,
-      tl.LayerNorm()
+  # Assemble and return the model.
+  return tl.Serial(                               # toks
+      # Encode.
+      tl.Branch(
+          positional_encoder, tl.PaddingMask()),  # vecs masks
+      encoder_blocks,                             # vecs masks
+      tl.Select([0], n_in=2),                     # vecs
+      tl.LayerNorm(),                             # vecs
+
+      # Map to output categories.
+      tl.Mean(axis=1),                            # vecs
+      tl.Dense(n_classes),                        # vecs
+      tl.LogSoftmax(),                            # vecs
   )
 
 def FunnelTransformer():
