@@ -9,11 +9,9 @@ import numpy as np
 
 def _InternalMaxPool(arr):
     shape = arr.shape
-    np.reshape(arr, (*shape[:-1],int(shape[-1]/2), 2))
-    arr=np.max(arr, axis=-1, keepdims=False)
+    arr=arr.reshape((*shape[:-1],int(shape[-1]/2), 2))
+    arr=arr.max(axis=-1, keepdims=False)
     return arr
-
-
 
 
 def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
@@ -60,22 +58,22 @@ def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
         d_feature=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
     
     return tl.Serial( # h, mask
-        tl.Parallel(
-            None,
-            tl.Fn('max pool experiment', lambda x: _InternalMaxPool),
-        ), # h, mask'
-        tl.Dup(), # h, h, mask'
-        tl.Dup(), # h, h, h, mask'
+        tl.Dup(), # h, h, mask
+        tl.Dup(), # h, h, h, mask
         pool_layer(pool_size=pool_size,
                 strides=strides,
-                padding=padding),# q,k,v,masks=h',h,h,mask'
-        tl.Dup(), # h', h', h, h, mask'
+                padding=padding),# q,k,v,masks=h',h,h,mask
+        tl.Dup(), # h', h', h, h, mask
         tl.Parallel(
             None,
             attention
-        ), # h', attention(...), mask'
-        tl.Add(), # h'+attention(...), mask'
-        tl.LayerNorm() # funnel_activations, mask'
+        ), # h', attention(...), mask
+        tl.Add(), # h'+attention(...), mask
+        tl.LayerNorm(), # funnel_activations, mask
+        tl.Parallel(
+            None,
+            tl.Fn('max pool experiment', lambda x: _InternalMaxPool(x)),
+        ), # funnel_activations, mask'
         #TODO(mvxxx) fc
     )
 
