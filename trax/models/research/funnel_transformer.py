@@ -5,6 +5,7 @@ https://arxiv.org/abs/2006.03236
 """
 from trax import layers as tl
 from typing import List
+from trax.models.transformer import _EncoderBlock
 
 def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
                  dropout=0.1, dropout_shared_axes=None, 
@@ -70,7 +71,7 @@ def _FunnelDecoder():
     pass
 
 def _FunnelEncoder(input_vocab_size,
-                encoder_segment_lenghts=[4, 3, 3],
+                encoder_segment_lenghts,
                 output_vocab_size=None,
                 d_model=512, #start
                 d_ff=2048,
@@ -91,7 +92,8 @@ def _FunnelEncoder(input_vocab_size,
         tl.Embedding(vocab_size, d_model),
         tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
     ]
-  funnels=len(encoder_block_lenghts)-1
+  segments = len(encoder_segment_lenghts)
+  funnels = segments-1
   f,s = pool_size[0], strides[0]
   assert(funnels>=0)
 
@@ -100,11 +102,11 @@ def _FunnelEncoder(input_vocab_size,
         _val = init
         for _ in range(n):
             yield _val
-            _val = (_val - f)/s + 1
+            _val = int((_val - f)/s + 1)
+      return generator
 
-  dim_generator = funnel_size_generator(d_model, f, s, funnels)
-  funnel_dims = list(dim_generator() for _ in range(funnels))
-
+  dim_generator = funnel_size_generator(d_model, f, s, segments)
+  funnel_dims = list(dim_generator())
   in_embedder = Embedder(input_vocab_size)
 
   # Positional encodings are not shared between encoder and decoder.
@@ -120,12 +122,15 @@ def _FunnelEncoder(input_vocab_size,
 
   encoder_blocks = []
   n_encoder_segments = len(encoder_segment_lenghts)
-  for i in range(n_encoder_segments):
 
+  for i in range(n_encoder_segments):
+      # Building i'th segment
       for _ in range(encoder_segment_lenghts[i]):
+        # segment_size encoder blocks
         encoder_blocks.append(_EncoderBlock(funnel_dims[i], d_ff, n_heads, dropout, dropout_shared_axes,
                         mode, ff_activation))
 
+      # if not last segment, add funnel block
       if i != n_encoder_segments-1:
           encoder_blocks.append(_FunnelBlock(funnel_dims[i], pool_layer=pool_layer))
 
