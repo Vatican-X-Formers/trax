@@ -1,8 +1,7 @@
 """Funnel Transformer model.
 
-Funnel-Transformer: Filtering out Sequential Redundancy for Efficient Language Processing
-https://arxiv.org/abs/2006.03236
-"""
+Funnel-Transformer: Filtering out Sequential Redundancy for Efficient
+Language Processing https://arxiv.org/abs/2006.03236 """
 from trax import layers as tl
 from trax.layers.assert_shape import assert_shape
 from trax.models.transformer import _EncoderBlock, _FeedForwardBlock
@@ -15,9 +14,26 @@ def _InternalMaxPool(arr):
   return arr
 
 
+@assert_shape('bld->bSd')
+def PoolLayer(pool_layer=tl.AvgPool,
+              pool_size=(2,),
+              strides=(2,),
+              separate_cls=True):
+  return tl.Serial(
+      tl.Branch(
+          tl.Fn('select_cls_token', lambda x: x[:, :1, :]),
+          tl.Serial(
+              tl.Fn('rest_tokens', lambda x: x[:, 1:, :]),
+              pool_layer(pool_size, strides)
+          )
+      ),
+      tl.Concatenate(axis=1)
+  ) if separate_cls else pool_layer(pool_size, strides)
+
+
 def _FunnelBlock(d_model, d_ff, n_heads,
                  dropout, dropout_shared_axes, mode, ff_activation,
-                 pool_layer, pool_size, strides):
+                 pool_layer, pool_size, strides, separate_cls):
   """Internal funnel block. On input it takes (activations, masks).
 
   Args:
@@ -49,11 +65,12 @@ def _FunnelBlock(d_model, d_ff, n_heads,
       d_feature=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+  pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
+
   return tl.Serial(  # h, mask
       tl.Dup(),  # h, h, mask
       tl.Dup(),  # h, h, h, mask
-      pool_layer(pool_size=pool_size,
-                 strides=strides),  # q,k,v,masks=h',h,h,mask
+      pooling,  # q,k,v,masks=h',h,h,mask
       tl.Dup(),  # h', h', h, h, mask
       tl.Parallel(
           None,
@@ -63,7 +80,7 @@ def _FunnelBlock(d_model, d_ff, n_heads,
       tl.LayerNorm(),  # funnel_activations, mask
       tl.Parallel(
           None,
-          tl.Fn('max pool experiment', lambda x: _InternalMaxPool(x)),
+          tl.Fn('max pool experiment', _InternalMaxPool),
       ),  # funnel_activations, mask'
       feed_forward
   )
@@ -82,12 +99,13 @@ def FunnelTransformerEncoder(vocab_size,
                              ff_activation=tl.Relu,
                              pool_layer=tl.AvgPool,
                              pool_size=(2,),
-                             strides=(2,)):
+                             strides=(2,),
+                             separate_cls=True):
   """Returns a Funnel Encoder.
   """
   segments = len(encoder_segment_lengths)
   funnels = segments - 1
-  assert (funnels >= 0)
+  assert funnels >= 0
 
   positional_encoder = [
       tl.Embedding(vocab_size, d_model),
@@ -107,7 +125,10 @@ def FunnelTransformerEncoder(vocab_size,
 
     # if not last segment, add funnel block
     if i != n_encoder_segments - 1:
-      encoder_blocks.append(_FunnelBlock(d_model, pool_layer=pool_layer))
+      encoder_blocks.append(_FunnelBlock(d_model, d_ff, n_heads, dropout,
+                                         dropout_shared_axes, mode,
+                                         ff_activation, pool_layer, pool_size,
+                                         strides, separate_cls))
 
   # Assemble and return the model.
   return tl.Serial(  # toks
@@ -123,23 +144,6 @@ def FunnelTransformerEncoder(vocab_size,
       tl.Dense(n_classes),  # vecs
       tl.LogSoftmax(),  # vecs
   )
-
-
-@assert_shape('bld->bSd')
-def PoolLayer(pool_layer=tl.AvgPool,
-              pool_size=(2,),
-              strides=(2,),
-              separate_cls=True):
-  return tl.Serial(
-      tl.Branch(
-          tl.Fn('select_cls_token', lambda x: x[:, :1, :]),
-          tl.Serial(
-              tl.Fn('rest_tokens', lambda x: x[:, 1:, :]),
-              pool_layer(pool_size, strides)
-          )
-      ),
-      tl.Concatenate(axis=1)
-  ) if separate_cls else pool_layer(pool_size, strides)
 
 
 def _FunnelResidualBlock(d_model, d_ff, n_heads,
@@ -169,7 +173,3 @@ def _FunnelResidualBlock(d_model, d_ff, n_heads,
           feed_forward
       )
   ]
-
-
-def FunnelTransformer():
-  pass
