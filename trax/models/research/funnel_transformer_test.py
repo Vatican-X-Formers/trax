@@ -71,14 +71,13 @@ class FunnelTransformerTest(parameterized.TestCase):
     self.assertEqual(y.shape, (3, n_classes))
 
   def test_funnel_transformer_forward_shape(self):
-    n_classes = 2
-    model = FunnelTransformer(10, n_classes)
+    model = FunnelTransformer(10)
 
-    x = np.ones((3, 2048), dtype=np.int32)
+    x = np.ones((3, 64), dtype=np.int32)
     _ = model.init(shapes.signature(x))
     y = model(x)
 
-    self.assertEqual(y.shape, (3, n_classes))
+    self.assertEqual(y.shape, (3, 64, 512))
 
 if __name__ == '__main__':
   absltest.main()
