@@ -16,8 +16,8 @@ def _InternalMaxPool(arr):
 
 
 def _upsample(short, long):
-    factor = -(-long.shape(1) // short.shape(1))  # ceil division
-    return short.repeat(factor, axis=1)[, :long.shape(1), ]
+    factor = -(-long.shape[1] // short.shape[1])  # ceil division
+    return short.repeat(factor, axis=1)[:, :long.shape[1], :]
 
 
 def _Upsampler():
