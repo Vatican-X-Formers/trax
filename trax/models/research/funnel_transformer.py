@@ -146,7 +146,7 @@ def _FunnelEncoder(vocab_size,
 
 def FunnelTransformer(vocab_size,
                       encoder_segment_lenghts,
-                      n_decoder_segments,
+                      n_decoder_blocks,
                       d_model=512,  # start
                       d_ff=2048,
                       n_heads=8,
@@ -190,7 +190,7 @@ def FunnelTransformer(vocab_size,
 
     decoder_blocks = [_EncoderBlock(d_model, d_ff, n_heads, dropout,
                                     dropout_shared_axes, mode, ff_activation)
-                      for _ in range(n_decoder_segments)]
+                      for _ in range(n_decoder_blocks)]
 
     # Assemble and return the model.
     return tl.Serial(  # toks
