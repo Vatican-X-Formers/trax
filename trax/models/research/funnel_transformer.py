@@ -1,3 +1,19 @@
+# coding=utf-8
+# Copyright 2020 The Trax Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Lint as: python3
 """Funnel Transformer model.
 
 Funnel-Transformer: Filtering out Sequential Redundancy for Efficient
@@ -67,21 +83,19 @@ def _FunnelBlock(d_model, d_ff, n_heads,
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
   pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
 
-  return tl.Serial(  # h, mask
-      tl.Dup(),  # h, h, mask
-      tl.Dup(),  # h, h, h, mask
-      pooling,  # q,k,v,masks=h',h,h,mask
-      tl.Dup(),  # h', h', h, h, mask
+  return tl.Serial(                                   # h, mask
+      tl.Branch(pooling, None, None),                 # h', h, h, mask
+      tl.Dup(),                                       # h', h', h, h, mask
       tl.Parallel(
           None,
           attention
-      ),  # h', attention(...), mask
-      tl.Add(),  # h'+attention(...), mask
-      tl.LayerNorm(),  # funnel_activations, mask
+      ),                                              # h', attention(...), mask
+      tl.Add(),                                       # h'+attention(...), mask
+      tl.LayerNorm(),                                 # funnel_activations, mask
       tl.Parallel(
           None,
           tl.Fn('max pool experiment', _InternalMaxPool),
-      ),  # funnel_activations, mask'
+      ),                                             # funnel_activations, mask'
       feed_forward
   )
 
@@ -131,18 +145,18 @@ def FunnelTransformerEncoder(vocab_size,
                                          strides, separate_cls))
 
   # Assemble and return the model.
-  return tl.Serial(  # toks
+  return tl.Serial(                               # toks
       # Encode.
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks,  # vecs masks
-      tl.Select([0], n_in=2),  # vecs
-      tl.LayerNorm(),  # vecs
+      encoder_blocks,                             # vecs masks
+      tl.Select([0], n_in=2),                     # vecs
+      tl.LayerNorm(),                             # vecs
 
       # Map to output categories.
-      tl.Mean(axis=1),  # vecs
-      tl.Dense(n_classes),  # vecs
-      tl.LogSoftmax(),  # vecs
+      tl.Mean(axis=1),                            # vecs
+      tl.Dense(n_classes),                        # vecs
+      tl.LogSoftmax(),                            # vecs
   )
 
 
