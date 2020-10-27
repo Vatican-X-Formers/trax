@@ -15,9 +15,11 @@ def _InternalMaxPool(arr):
     return arr
 
 
-def _upsample(short, long):
+def _upsample(short, masks, long):
     factor = -(-long.shape[1] // short.shape[1])  # ceil division
-    return short.repeat(factor, axis=1)[:, :long.shape[1], :]
+    new_vecs = long + short.repeat(factor, axis=1)[:, :long.shape[1], :]
+    new_masks = masks.repeat(factor, axis=-1)[:, :, :, :long.shape[1]]
+    return new_vecs, new_masks
 
 
 def _Upsampler():
@@ -199,9 +201,8 @@ def FunnelTransformer(vocab_size,
         encoder_blocks_before_first_pooling,  # vecs masks
         tl.Select([0, 1, 0]),  # vecs masks residual = vecs
         encoder_blocks_from_first_pooling,  # vecs masks residual
-        tl.Select([0, 2, 1], n_in=3),  # vecs residual masks
         tl.Parallel(  # residual from first segment is taken before normalization, so apply it now
-            None, tl.LayerNorm(), None),  # vecs norm(residual) masks
+            None, None, tl.LayerNorm()),  # vecs masks norm(residual)
         _Upsampler(),  # vecs masks
         decoder_blocks,
         tl.Select([0], n_in=2),  # vecs
