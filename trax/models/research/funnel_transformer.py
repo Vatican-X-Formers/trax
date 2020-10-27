@@ -23,7 +23,7 @@ def _upsample(short, masks, long):
 
 
 def _Upsampler():
-    return tl.Fn('Upsampler', _upsample)
+    return tl.Fn('Upsampler', _upsample, n_out=2)
 
 
 def _FunnelBlock(d_model=512, d_ff=2048, n_heads=8,
