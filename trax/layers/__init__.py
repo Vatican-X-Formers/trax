@@ -37,6 +37,7 @@ from trax.layers.research.position_encodings import *
 from trax.layers.research.sparsity import *
 from trax.layers.reversible import *
 from trax.layers.rnn import *
+from trax.layers.relattention import *
 
 
 # Ginify
