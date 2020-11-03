@@ -128,8 +128,8 @@ class RelativeAttention(base.Layer):
       stride = 1
 
     # adjusting pos_emb to currently pooled sequence
-    while pos_emb.shape[0] != k.shape[-2]:
-      pos_emb = pos_emb[1::2, :, :]
+    while pos_emb.shape[0] != k.shape[-2] * 2 - 1:
+      pos_emb = pos_emb[1::2, :]
 
     d_feature = q.shape[-1]
     n_heads = self._n_heads
@@ -142,7 +142,7 @@ class RelativeAttention(base.Layer):
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(q),
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(k),
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(v),
-        pos_emb,
+        pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
         biases[0],
         biases[1],
         stride,
@@ -185,10 +185,12 @@ def DotProductRelativeAttention(queries, keys, values, pos_emb, u_bias, v_bias,
     Per-head activations resulting from masked per-head attention-weighted
     sum of per-head values.
   """
+    # import pdb; pdb.set_trace()
+
     # queries, keys, values are shape (batch_size, n_heads, seq_len, d_head)
-    # poition embeddings are shape (2 * keys_len - 1, n_heads, d_head)
+    # position embeddings are shape (2 * keys_len - 1, n_heads, d_head)
     # bias vectors are shape (1, n_heads, 1, d_head)
-    # mask is shape (batch_size, 1, 1, queries_len)
+    # mask is shape (batch_size, 1, 1, keys_len)
     d_feature = queries.shape[-1]
 
     # Compute parts of attention score

@@ -226,7 +226,6 @@ def FunnelTransformerEncoder(vocab_size,
       sinusoid_freq = np.einsum('i,j->ij', positions, inv_freq)
       pos_emb = np.concatenate([np.sin(sinusoid_freq),
                                 np.cos(sinusoid_freq)], axis=1)
-      pos_emb = pos_emb.reshape((seq_len * 2 - 1, n_heads, d_head))
       return pos_emb
 
     def G(a, b, c):
@@ -271,8 +270,7 @@ def FunnelTransformer(vocab_size,
                       pool_layer=tl.AvgPool,
                       pool_size=(2,),
                       strides=(2,),
-                      separate_cls=True,
-                      bias_initializer=init.RandomNormalInitializer(1e-6)):
+                      separate_cls=True):
   """Returns a Full Funnel Transformer.
   """
   segments = len(encoder_segment_lengths)

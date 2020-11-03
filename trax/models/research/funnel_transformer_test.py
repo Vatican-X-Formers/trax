@@ -61,15 +61,15 @@ class FunnelTransformerTest(parameterized.TestCase):
     self.assertEqual(y.shape, (1, n_even // 2, d_model))
 
   def test_funnel_transformer_encoder_forward_shape(self):
-    n_classes = 2
+    n_classes = 4
     trax.fastmath.disable_jit()
-    model = FunnelTransformerEncoder(3, n_classes, 16, 16)
+    model = FunnelTransformerEncoder(3, n_classes, 16, 32)
 
-    x = np.ones((1, 16), dtype=np.int32)
+    x = np.ones((2, 64), dtype=np.int32)
     _ = model.init(shapes.signature(x))
     y = model(x)
 
-    self.assertEqual(y.shape, (1, n_classes))
+    self.assertEqual(y.shape, (2, n_classes))
 
   def test_funnel_transformer_forward_shape(self):
     model = FunnelTransformer(10)
