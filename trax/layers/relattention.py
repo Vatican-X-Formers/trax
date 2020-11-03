@@ -56,40 +56,9 @@ from trax.layers.attention import SplitIntoHeads, MergeHeads
 # Layers are always CamelCase, but functions in general are snake_case
 # pylint: disable=invalid-name
 
-# inputs are [batch, length, depth], [batch, 1, 1 length]
-@assert_shape('bld,b11l->bld,b11l')
-def Attention(d_feature, n_heads=1, dropout=0.0, mode='train'):
-  """Returns a layer that maps (activations, mask) to (new_activations, mask).
-
-  This layer type represents one pass of multi-head self-attention, best
-  known for its central role in Transformer models. Internally, it:
-
-    - maps incoming sequence of activations to sequence of (query, key, value)
-      triples,
-    - splits queries, keys, and values into multiple 'heads',
-    - computes per-head attention weights from per-head (queries, keys),
-    - applies mask to screen out positions that come from padding tokens,
-    - [in `'train'` mode] applies dropout to attention weights,
-    - uses attention weights to combine per-head values vectors, and
-    - fuses per-head results into outgoing activations matching original input
-      activation shapes.
-
-  Args:
-    d_feature: Depth/dimensionality of feature embedding.
-    n_heads: Number of attention heads.
-    dropout: Probababilistic rate for internal dropout applied to attention
-        activations (based on query-key pairs) before dotting them with values.
-    mode: One of `'train'`, `'eval'`, or `'predict'`.
-  """
-  return cb.Serial(
-      cb.Select([0, 0, 0]),
-      AttentionQKV(d_feature, n_heads=n_heads, dropout=dropout, mode=mode),
-  )
-
-
-@assert_shape('bSq,blk,blv,b1xl->bSd,b1xl')
-def AttentionQKV(d_feature, n_heads=1, dropout=0.0, mode='train'):
-  """Returns a layer that maps (q, k, v, mask) to (activations, mask).
+def RelativeAttentionLayer(d_feature, n_heads=1, dropout=0.0, mode='train'):
+  """Returns a layer that maps (q, k, v, pos_emb, biases, mask) to
+                                  (activations, pos_emb, biases, mask).
 
   See `Attention` above for further context/details.
 
@@ -105,6 +74,7 @@ def AttentionQKV(d_feature, n_heads=1, dropout=0.0, mode='train'):
           core.Dense(d_feature),
           core.Dense(d_feature),
           core.Dense(d_feature),
+          core.Dense(d_feature),
       ),
       RelativeAttention(  # pylint: disable=no-value-for-parameter
           n_heads=n_heads, dropout=dropout, mode=mode),
@@ -114,7 +84,6 @@ def AttentionQKV(d_feature, n_heads=1, dropout=0.0, mode='train'):
 
 # 'k' is number of keys/values, while 'l' is number of queries. Typically they
 # will be the same, but it is not necessary.
-@assert_shape('blq,bkq,bkd,b1xk->bld,b1xk')
 class RelativeAttention(base.Layer):
   """Returns a layer that maps (q, k, v, mask) to (activations, mask).
 
@@ -139,7 +108,7 @@ class RelativeAttention(base.Layer):
           (based on query-key pairs) before applying them to values.
       mode: One of `'train'`, `'eval'`, or `'predict'`.
     """
-    super().__init__(n_in=4, n_out=2)
+    super().__init__(n_in=6, n_out=4)
     self._n_heads = n_heads
     self._dropout = dropout
     self._mode = mode
@@ -150,7 +119,17 @@ class RelativeAttention(base.Layer):
     Args:
       inputs: A (queries, keys, values, mask) tuple.
     """
-    q, k, v, mask = inputs
+    q, k, v, pos_emb, biases, mask = inputs
+
+    # comparing sequence lengths
+    if q.shape[-2] != k.shape[-2]:
+      stride = 2
+    else:
+      stride = 1
+
+    # adjusting pos_emb to currently pooled sequence
+    while pos_emb.shape[0] != k.shape[-2]:
+      pos_emb = pos_emb[1::2, :, :]
 
     d_feature = q.shape[-1]
     n_heads = self._n_heads
@@ -163,6 +142,10 @@ class RelativeAttention(base.Layer):
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(q),
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(k),
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(v),
+        pos_emb,
+        biases[0],
+        biases[1],
+        stride,
         mask,
         dropout=self._dropout,
         mode=self._mode,
@@ -171,7 +154,7 @@ class RelativeAttention(base.Layer):
       self.state = dots
     merged_results = MergeHeads(n_heads, merged_batch_and_head=False).forward(
         per_head_results)
-    return (merged_results, mask)
+    return (merged_results, pos_emb, biases, mask)
 
 
 def DotProductRelativeAttention(queries, keys, values, pos_emb, u_bias, v_bias,

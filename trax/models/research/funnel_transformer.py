@@ -21,8 +21,10 @@ Language Processing https://arxiv.org/abs/2006.03236 """
 import numpy as np
 
 from trax import layers as tl
+from trax.layers.relattention import RelativeAttentionLayer
 from trax.layers import core
 from trax.layers import initializers as init
+from trax.layers import combinators as cb
 from trax.layers.assert_shape import assert_shape
 from trax.models.transformer import _FeedForwardBlock
 
@@ -92,26 +94,28 @@ def _FunnelBlock(d_model, d_ff, n_heads,
   Returns:
       A list of layers that maps (activations, mask) to (activations', mask).
   """
-  attention = tl.AttentionQKV(
+  attention = RelativeAttentionLayer(
       d_feature=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
   pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
 
-  return tl.Serial(  # h, mask
-      tl.Branch(pooling, None, None),  # h', h, h, mask
-      tl.Dup(),  # h', h', h, h, mask
+  return tl.Serial(  # vecs, pos_emb, biases, masks
+      tl.Branch(pooling, None, None),  # h', h, h, pos_emb, biases, masks
+      tl.Dup(),  # h', h', h, h, pos_emb, biases, masks
       tl.Parallel(
           None,
           attention
-      ),  # h', attention(...), mask
-      tl.Add(),  # h'+attention(...), mask
-      tl.LayerNorm(),  # funnel_activations, mask
+      ),  # h', attention(...), pos_emb, biases, masks
+      tl.Add(),  # h'+attention(...), pos_emb, biases, masks
+      tl.LayerNorm(),  # funnel_activations, pos_emb, biases, masks
       tl.Parallel(
+          None,
+          None,
           None,
           tl.Fn('max pool experiment',
                 _InternalMaxPool),
-      ),  # funnel_activations, mask'
+      ),  # funnel_activations, pos_emb, biases, mask'
       feed_forward
   )
 
@@ -141,9 +145,10 @@ def _RelativeEncoderBlock(d_model, d_ff, n_heads,
         be an activation-type subclass of `Layer`.
 
   Returns:
-    A list of layers that maps (activations, mask) to (activations, mask).
+    A list of layers that maps (activations, att_vecs, mask) to
+                               (activations, att_vecs, mask).
   """
-  attention = tl.Attention(
+  attention = RelativeAttentionLayer(
       d_model, n_heads=n_heads, dropout=dropout, mode=mode)
 
   feed_forward = _FeedForwardBlock(
@@ -153,14 +158,15 @@ def _RelativeEncoderBlock(d_model, d_ff, n_heads,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Residual(
+      tl.Residual( # vecs, pos_emb, biases, masks
           tl.LayerNorm(),
+          cb.Select([0, 0, 0]),
           attention,
           dropout_,
-      ),
+      ), # vecs, pos_emb, biases, masks
       tl.Residual(
           feed_forward
-      ),
+      ), # vecs, pos_emb, biases, masks
   ]
 
 
@@ -223,16 +229,14 @@ def FunnelTransformerEncoder(vocab_size,
       pos_emb = pos_emb.reshape((seq_len * 2 - 1, n_heads, d_head))
       return pos_emb
 
-    def G(*args):
-      return args
+    def G(a, b, c):
+      return c, (a, b)
 
     return tl.Serial(
-        tl.Branch(
-          tl.Fn('Absolute positional embeddings', F, n_out=1),
-          core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head)),
-          core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head))
-        ),
-        tl.Fn('To tuple', G, n_out=1)
+        tl.Fn('Absolute positional embeddings', F, n_out=1),
+        core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head)),
+        core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head)),
+        tl.Fn('To tuple', G, n_out=2)  # pos_emb, (v_bias, u_bias)
     )
 
   # Assemble and return the model.
@@ -241,9 +245,9 @@ def FunnelTransformerEncoder(vocab_size,
       tl.Branch(
           embedding_encoder,
           PrepareAttentionInputs(),
-          tl.PaddingMask()),  # vecs att_vecs masks
-      encoder_blocks,  # vecs att_vecs masks
-      tl.Select([0], n_in=3),  # vecs
+          tl.PaddingMask()),  # vecs, pos_emb, biases, masks
+      encoder_blocks,  # vecs, pos_emb, biases, masks
+      tl.Select([0], n_in=4),  # vecs
       tl.LayerNorm(),  # vecs
 
       # Map to output categories.

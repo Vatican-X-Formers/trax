@@ -17,12 +17,12 @@
 """Tests for Funnel-Transformer models."""
 
 import numpy as np
+import trax
 from absl.testing import absltest
 from absl.testing import parameterized
 
 from trax import layers as tl, shapes
 from trax.models.research.funnel_transformer import PoolLayer, \
-  _FunnelResidualBlock, \
   FunnelTransformerEncoder, \
   FunnelTransformer
 
@@ -62,13 +62,14 @@ class FunnelTransformerTest(parameterized.TestCase):
 
   def test_funnel_transformer_encoder_forward_shape(self):
     n_classes = 2
-    model = FunnelTransformerEncoder(10, n_classes)
+    trax.fastmath.disable_jit()
+    model = FunnelTransformerEncoder(3, n_classes, 16, 16)
 
-    x = np.ones((3, 2048), dtype=np.int32)
+    x = np.ones((1, 16), dtype=np.int32)
     _ = model.init(shapes.signature(x))
     y = model(x)
 
-    self.assertEqual(y.shape, (3, n_classes))
+    self.assertEqual(y.shape, (1, n_classes))
 
   def test_funnel_transformer_forward_shape(self):
     model = FunnelTransformer(10)
