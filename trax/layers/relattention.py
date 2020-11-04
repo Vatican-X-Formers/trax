@@ -185,8 +185,6 @@ def DotProductRelativeAttention(queries, keys, values, pos_emb, u_bias, v_bias,
     Per-head activations resulting from masked per-head attention-weighted
     sum of per-head values.
   """
-    # import pdb; pdb.set_trace()
-
     # queries, keys, values are shape (batch_size, n_heads, seq_len, d_head)
     # position embeddings are shape (2 * keys_len - 1, n_heads, d_head)
     # bias vectors are shape (1, n_heads, 1, d_head)
