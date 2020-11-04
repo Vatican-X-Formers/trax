@@ -129,9 +129,7 @@ def FunnelTransformerEncoder(vocab_size,
                              separate_cls=True):
   """Returns a Funnel Encoder.
   """
-  segments = len(encoder_segment_lengths)
-  funnels = segments - 1
-  assert funnels >= 0
+  assert encoder_segment_lengths
 
   positional_encoder = [
       tl.Embedding(vocab_size, d_model),
