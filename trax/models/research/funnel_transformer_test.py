@@ -41,7 +41,7 @@ class FunnelTransformerTest(parameterized.TestCase):
 
   def test_funnel_block_forward_shape(self):
     n_even = 4
-    d_model = 32
+    d_model = 8
 
     x = np.ones((1, n_even, d_model), dtype=np.float)
     mask = np.ones((1, n_even), dtype=np.int32)
@@ -50,8 +50,8 @@ class FunnelTransformerTest(parameterized.TestCase):
     mask = masker(mask)
 
     block = tl.Serial(
-      *_FunnelResidualBlock(d_model, 64, 1, 0.1, None, 'train', tl.Relu,
-                            tl.AvgPool, (2,), (2,)))
+        *_FunnelResidualBlock(d_model, 8, 2, 0.1, None, 'train', tl.Relu,
+                              tl.AvgPool, (2,), (2,)))
 
     xs = [x, mask]
     _, _ = block.init(shapes.signature(xs))
@@ -61,23 +61,34 @@ class FunnelTransformerTest(parameterized.TestCase):
     self.assertEqual(y.shape, (1, n_even // 2, d_model))
 
   def test_funnel_transformer_encoder_forward_shape(self):
-    n_classes = 2
-    model = FunnelTransformerEncoder(10, n_classes)
+    n_classes = 5
+    model = FunnelTransformerEncoder(2, n_classes=n_classes, d_model=8,
+                                     d_ff=8, encoder_segment_lengths=(1, 1),
+                                     n_heads=2, max_len=8)
 
-    x = np.ones((3, 2048), dtype=np.int32)
+    batch_size = 2
+    n_tokens = 4
+    x = np.ones((batch_size, n_tokens), dtype=np.int32)
     _ = model.init(shapes.signature(x))
     y = model(x)
 
-    self.assertEqual(y.shape, (3, n_classes))
+    self.assertEqual(y.shape, (batch_size, n_classes))
 
   def test_funnel_transformer_forward_shape(self):
-    model = FunnelTransformer(10)
+    d_model = 8
+    model = FunnelTransformer(2, d_model=d_model, d_ff=8,
+                              encoder_segment_lengths=(1, 1),
+                              n_decoder_blocks=1, n_heads=2, max_len=8)
 
-    x = np.ones((3, 64), dtype=np.int32)
+    batch_size = 2
+    n_tokens = 4
+    # TODO(shadowatyy): doesn't work when n_tokens is odd
+    x = np.ones((batch_size, n_tokens), dtype=np.int32)
     _ = model.init(shapes.signature(x))
     y = model(x)
 
-    self.assertEqual(y.shape, (3, 64, 512))
+    self.assertEqual(y.shape, (batch_size, n_tokens, d_model))
+
 
 if __name__ == '__main__':
   absltest.main()
