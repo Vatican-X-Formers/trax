@@ -35,16 +35,22 @@ def PoolLayer(pool_layer=tl.AvgPool,
               pool_size=(2,),
               strides=(2,),
               separate_cls=True):
-  return tl.Serial(
-      tl.Branch(
-          tl.Fn('select_cls_token', lambda x: x[:, :1, :]),
-          tl.Serial(
-              tl.Fn('rest_tokens', lambda x: x[:, 1:, :]),
-              pool_layer(pool_size, strides)
-          )
-      ),
-      tl.Concatenate(axis=1)
-  ) if separate_cls else pool_layer(pool_size, strides)
+  if separate_cls:
+    cls_selection = tl.Fn('select_cls_token', lambda x: x[:, :1, :])
+    tokens_after_cls = tl.Fn('rest_tokens', lambda x: x[:, 1:, :])
+
+    return tl.Serial(
+        tl.Branch(
+            cls_selection,
+            tl.Serial(
+                tokens_after_cls,
+                pool_layer(pool_size, strides)
+            )
+        ),
+        tl.Concatenate(axis=1)
+    )
+  else:
+    return pool_layer(pool_size, strides)
 
 
 def _Upsample(short, masks, long):
