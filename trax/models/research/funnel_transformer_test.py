@@ -22,9 +22,7 @@ from absl.testing import parameterized
 
 from trax import layers as tl, shapes
 from trax.models.research.funnel_transformer import PoolLayer, \
-  _FunnelResidualBlock, \
-  FunnelTransformerEncoder, \
-  FunnelTransformer
+  _FunnelResidualBlock, FunnelTransformerEncoder, FunnelTransformer, MaskPool
 
 
 class FunnelTransformerTest(parameterized.TestCase):
@@ -38,6 +36,20 @@ class FunnelTransformerTest(parameterized.TestCase):
 
     self.assertEqual(y.shape, (1, 2, 1))
     self.assertEqual(y.tolist(), [[[5.], [3.]]])
+
+  def test_mask_pool(self):
+    x = np.array([1, 0, 0, 1], dtype=bool).reshape((1, 1, 1, 4))
+    pooling_cls = MaskPool((2,), (2,))
+    y1 = pooling_cls(x)
+
+    self.assertEqual(y1.shape, (1, 1, 1, 2))
+    self.assertEqual(y1.squeeze().tolist(), [True, False])
+
+    pooling_without_cls = MaskPool((2,), (2,), separate_cls=False)
+    y2 = pooling_without_cls(x)
+
+    self.assertEqual(y2.shape, (1, 1, 1, 2))
+    self.assertEqual(y2.squeeze().tolist(), [True, True])
 
   def test_funnel_block_forward_shape(self):
     n_even = 4
@@ -82,7 +94,6 @@ class FunnelTransformerTest(parameterized.TestCase):
 
     batch_size = 2
     n_tokens = 4
-    # TODO(shadowatyy): doesn't work when n_tokens is odd
     x = np.ones((batch_size, n_tokens), dtype=np.int32)
     _ = model.init(shapes.signature(x))
     y = model(x)

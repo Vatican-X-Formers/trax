@@ -23,13 +23,6 @@ from trax.layers.assert_shape import assert_shape
 from trax.models.transformer import _EncoderBlock, _FeedForwardBlock
 
 
-def _InternalMaxPool(arr):
-  shape = arr.shape
-  arr = arr.reshape((*shape[:-1], int(shape[-1] / 2), 2))
-  arr = arr.max(axis=-1, keepdims=False)
-  return arr
-
-
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
               pool_size=(2,),
@@ -51,6 +44,15 @@ def PoolLayer(pool_layer=tl.AvgPool,
     )
   else:
     return pool_layer(pool_size, strides)
+
+
+@assert_shape('b11l->b11S')
+def MaskPool(pool_size=(2,), strides=(2,), separate_cls=True):
+  return tl.Serial(
+      tl.Fn('reshape', lambda x: x.swapaxes(1, -1).squeeze(axis=-1)),
+      PoolLayer(tl.MaxPool, pool_size, strides, separate_cls),
+      tl.Fn('reshape_back', lambda x: x[..., None].swapaxes(1, -1))
+  )
 
 
 def _Upsample(short, masks, long):
@@ -100,20 +102,19 @@ def _FunnelBlock(d_model, d_ff, n_heads,
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
   pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
 
-  return tl.Serial(                     # h, mask
-      tl.Branch(pooling, None, None),   # h', h, h, mask
-      tl.Dup(),                         # h', h', h, h, mask
+  return tl.Serial(  # h, mask
+      tl.Branch(pooling, None, None),  # h', h, h, mask
+      tl.Dup(),  # h', h', h, h, mask
       tl.Parallel(
           None,
           attention
-      ),                                # h', attention(...), mask
-      tl.Add(),                         # h'+attention(...), mask
-      tl.LayerNorm(),                   # funnel_activations, mask
+      ),  # h', attention(...), mask
+      tl.Add(),  # h'+attention(...), mask
+      tl.LayerNorm(),  # funnel_activations, mask
       tl.Parallel(
           None,
-          tl.Fn('mask_max_pool',
-                _InternalMaxPool),
-      ),                                # funnel_activations, mask'
+          MaskPool()
+      ),  # funnel_activations, mask'
       feed_forward
   )
 
@@ -161,18 +162,18 @@ def FunnelTransformerEncoder(vocab_size,
                                          strides, separate_cls))
 
   # Assemble and return the model.
-  return tl.Serial(                               # toks
+  return tl.Serial(  # toks
       # Encode.
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks,                             # vecs masks
-      tl.Select([0], n_in=2),                     # vecs
-      tl.LayerNorm(),                             # vecs
+      encoder_blocks,  # vecs masks
+      tl.Select([0], n_in=2),  # vecs
+      tl.LayerNorm(),  # vecs
 
       # Map to output categories.
-      tl.Mean(axis=1),                            # vecs
-      tl.Dense(n_classes),                        # vecs
-      tl.LogSoftmax(),                            # vecs
+      tl.Mean(axis=1),  # vecs
+      tl.Dense(n_classes),  # vecs
+      tl.LogSoftmax(),  # vecs
   )
 
 
@@ -195,8 +196,7 @@ def _FunnelResidualBlock(d_model, d_ff, n_heads,
           tl.Parallel(tl.LayerNorm(), tl.LayerNorm()),
           tl.Select([0, 1, 1, 2]),
           attn_,
-          tl.Parallel(None, tl.Fn(
-              'mask_max_pool', _InternalMaxPool)),
+          tl.Parallel(None, MaskPool()),
           dropout_
       ),
       tl.Residual(
