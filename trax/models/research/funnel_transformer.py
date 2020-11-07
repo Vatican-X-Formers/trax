@@ -55,6 +55,11 @@ def MaskPool(pool_size=(2,), strides=(2,), separate_cls=True):
   )
 
 
+@assert_shape('bld->bd')
+def SelectFirst():
+  return tl.Fn('select_first', lambda x: x[:, 0, :])
+
+
 def _Upsample(short, masks, long):
   factor = -(-long.shape[1] // short.shape[1])  # ceil division
   new_vecs = long + short.repeat(factor, axis=1)[:, :long.shape[1], :]
@@ -162,18 +167,18 @@ def FunnelTransformerEncoder(vocab_size,
                                          strides, separate_cls))
 
   # Assemble and return the model.
-  return tl.Serial(  # toks
-      # Encode.
+  return tl.Serial(                               # toks
+                                                  # Encode.
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks,  # vecs masks
-      tl.Select([0], n_in=2),  # vecs
-      tl.LayerNorm(),  # vecs
+      encoder_blocks,                             # vecs masks
+      tl.Select([0], n_in=2),                     # vecs
+      tl.LayerNorm(),                             # vecs
 
       # Map to output categories.
-      tl.Mean(axis=1),  # vecs
-      tl.Dense(n_classes),  # vecs
-      tl.LogSoftmax(),  # vecs
+      SelectFirst(),                              # cls
+      tl.Dense(n_classes),                        # cls
+      tl.LogSoftmax(),                            # cls
   )
 
 
