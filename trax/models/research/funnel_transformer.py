@@ -107,19 +107,19 @@ def _FunnelBlock(d_model, d_ff, n_heads,
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
   pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
 
-  return tl.Serial(  # h, mask
-      tl.Branch(pooling, None, None),  # h', h, h, mask
-      tl.Dup(),  # h', h', h, h, mask
+  return tl.Serial(                     # h, mask
+      tl.Branch(pooling, None, None),   # h', h, h, mask
+      tl.Dup(),                         # h', h', h, h, mask
       tl.Parallel(
           None,
           attention
-      ),  # h', attention(...), mask
-      tl.Add(),  # h'+attention(...), mask
-      tl.LayerNorm(),  # funnel_activations, mask
+      ),                                # h', attention(...), mask
+      tl.Add(),                         # h'+attention(...), mask
+      tl.LayerNorm(),                   # funnel_activations, mask
       tl.Parallel(
           None,
           MaskPool()
-      ),  # funnel_activations, mask'
+      ),                                # funnel_activations, mask'
       feed_forward
   )
 
