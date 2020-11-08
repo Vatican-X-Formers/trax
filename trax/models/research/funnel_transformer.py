@@ -20,7 +20,10 @@ Funnel-Transformer: Filtering out Sequential Redundancy for Efficient
 Language Processing https://arxiv.org/abs/2006.03236 """
 from trax import layers as tl
 from trax.layers.assert_shape import assert_shape
-from trax.models.transformer import _EncoderBlock, _FeedForwardBlock
+from trax.models.research.funnel_attention import \
+  FunnelCausalAttention
+from trax.models.transformer import _EncoderBlock, _FeedForwardBlock, \
+  _DecoderBlock
 
 
 @assert_shape('bld->bSd')
@@ -234,13 +237,13 @@ def FunnelTransformerEncoder(vocab_size,
   cls_pooling = SelectFirst() if separate_cls else tl.Mean(axis=1)
 
   # Assemble and return the model.
-  return tl.Serial(                               # toks
-                                                  # Encode.
+  return tl.Serial(  # toks
+      # Encode.
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks,                             # vecs masks
-      tl.Select([0], n_in=2),                     # vecs
-      tl.LayerNorm(),                             # vecs
+      encoder_blocks,  # vecs masks
+      tl.Select([0], n_in=2),  # vecs
+      tl.LayerNorm(),  # vecs
 
       # Map to output categories.
       cls_pooling,                                # cls
@@ -352,7 +355,7 @@ def FunnelTransformer(vocab_size,
                     for _ in range(n_decoder_blocks)]
 
   # Assemble and return the model.
-  return tl.Serial(                               # toks
+  return tl.Serial(  # toks
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
       encoder_blocks_before_first_pooling,        # vecs masks
@@ -366,7 +369,7 @@ def FunnelTransformer(vocab_size,
           None, tl.LayerNorm(), None),            # vecs norm(residual) masks
       _Upsampler(),                               # vecs masks
       decoder_blocks,
-      tl.Select([0], n_in=2),                     # vecs
+      tl.Select([0], n_in=2),  # vecs
       tl.LayerNorm(),
       tl.Dense(vocab_size),
       tl.LogSoftmax()
