@@ -62,8 +62,8 @@ class FunnelTransformerTest(parameterized.TestCase):
     mask = masker(mask)
 
     block = tl.Serial(
-        *_FunnelResidualBlock(d_model, 8, 2, 0.1, None, 'train', tl.Relu,
-                              tl.AvgPool, (2,), (2,)))
+        _FunnelResidualBlock(d_model, 8, 2, 0.1, None, 'train', tl.Relu,
+                             tl.AvgPool, (2,), (2,)))
 
     xs = [x, mask]
     _, _ = block.init(shapes.signature(xs))
