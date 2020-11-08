@@ -226,7 +226,6 @@ def FunnelTransformer(vocab_size,
                       ff_activation=tl.Relu,
                       pool_layer=tl.AvgPool,
                       pool_size=(2,),
-                      strides=(2,),
                       separate_cls=True):
   """Returns a Full Funnel Transformer.
   """
@@ -252,8 +251,9 @@ def FunnelTransformer(vocab_size,
     encoder_blocks_from_first_pooling.append(
         _FunnelBlock(d_model, d_ff, n_heads, dropout,
                      dropout_shared_axes, mode,
-                     ff_activation, pool_layer, pool_size,
-                     strides, separate_cls))
+                     ff_activation, pool_layer,
+                     pool_size=pool_size, strides=pool_size,
+                     separate_cls=separate_cls))
 
     for _ in range(encoder_segment_lengths[i]):
       # Create segment_size encoder blocks
