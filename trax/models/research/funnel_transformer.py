@@ -106,6 +106,7 @@ def _FunnelBlock(d_model, d_ff, n_heads,
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
   pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
+  mask_pooling = MaskPool(pool_size, strides, separate_cls)
 
   return tl.Serial(                     # h, mask
       tl.Branch(pooling, None, None),   # h', h, h, mask
@@ -118,7 +119,7 @@ def _FunnelBlock(d_model, d_ff, n_heads,
       tl.LayerNorm(),                   # funnel_activations, mask
       tl.Parallel(
           None,
-          MaskPool()
+          mask_pooling
       ),                                # funnel_activations, mask'
       feed_forward
   )
@@ -166,6 +167,8 @@ def FunnelTransformerEncoder(vocab_size,
                                          ff_activation, pool_layer, pool_size,
                                          strides, separate_cls))
 
+  cls_pooling = SelectFirst() if separate_cls else tl.Mean(axis=1)
+
   # Assemble and return the model.
   return tl.Serial(                               # toks
       # Encode.
@@ -176,7 +179,7 @@ def FunnelTransformerEncoder(vocab_size,
       tl.LayerNorm(),                             # vecs
 
       # Map to output categories.
-      SelectFirst(),                              # cls
+      cls_pooling,                                # cls
       tl.Dense(n_classes),                        # cls
       tl.LogSoftmax(),                            # cls
   )
