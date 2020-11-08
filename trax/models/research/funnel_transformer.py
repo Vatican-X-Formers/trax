@@ -168,7 +168,7 @@ def FunnelTransformerEncoder(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(                               # toks
-                                                  # Encode.
+      # Encode.
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
       encoder_blocks,                             # vecs masks
