@@ -135,6 +135,131 @@ def ApplyAttentionLayer(attention_type, d_model, n_heads, d_qk, d_v, causal,
   return tl.Chunk(attention, attention_chunk_size)
 
 
+def PositionalEncoder(mode, dropout=None, max_len=None,
+                      axial_pos_shape=None, d_axial_pos_embs=None):
+  """Returns the positional encoding layer depending on the arguments.
+
+  Args:
+    mode: If `'predict'`, use fast inference. If `'train'`, each encoder/decoder
+      block will include dropout; else, it will pass all values through
+      unaltered.
+    dropout: Stochastic rate (probability) for dropping an activation
+      value when applying dropout after the embedding block.
+    max_len: Maximum symbol length for positional encoding.
+    axial_pos_shape: tuple of ints: input shape to use for the axial position
+      encoding. If unset, axial position encoding is disabled.
+    d_axial_pos_embs: tuple of ints: depth of position embedding for each axis.
+      Tuple length must match axial_pos_shape, and values must sum to d_model.
+
+  Returns:
+    A layer that will do the positional encoding.
+  """
+
+  if not axial_pos_shape:
+    positional_encoding = tl.PositionalEncoding(
+        max_len=max_len, dropout=dropout, mode=mode)
+  elif axial_pos_shape == 'fixed-base':  # TODO(lukaszkaiser): remove this HACK
+    positional_encoding = tl.FixedBasePositionalEncoding(mode=mode)
+  elif axial_pos_shape == 'infinite':  # TODO(lukaszkaiser): remove this HACK
+    positional_encoding = tl.InfinitePositionalEncoding(affine=False)
+  elif axial_pos_shape == 'infinite-affine':
+    # TODO(lukaszkaiser): remove this HACK
+    positional_encoding = tl.InfinitePositionalEncoding()
+  elif axial_pos_shape == 'time-bin':  # TODO(lukaszkaiser): remove this HACK
+    positional_encoding = tl.TimeBinPositionalEncoding()
+  else:
+    assert d_axial_pos_embs is not None
+    positional_encoding = tl.AxialPositionalEncoding(
+        shape=axial_pos_shape, d_embs=d_axial_pos_embs,
+        dropout_broadcast_dims=tuple(range(1, len(axial_pos_shape) + 1)),
+        dropout=dropout, mode=mode)
+
+  return positional_encoding
+
+
+def EmbeddingAndPositionalEncodings(input_vocab_size,
+                                    d_model,
+                                    mode,
+                                    embedding_dropout,
+                                    dropout_shared_axes,
+                                    max_len,
+                                    output_vocab_size=None,
+                                    axial_pos_shape=None,
+                                    d_axial_pos_embs=None):
+  """Returns the embedder and positional encoder.
+
+  Args:
+    input_vocab_size: Input vocabulary size -- each element of the input tensor
+      should be an integer in `range(vocab_size)`. These integers typically
+      represent token IDs from a vocabulary-based tokenizer.
+    d_model: Final dimension of tensors at most points in the model, including
+      the initial embedding output.
+    mode: If `'predict'`, use fast inference. If `'train'`, each encoder/decoder
+      block will include dropout; else, it will pass all values through
+      unaltered.
+    embedding_dropout: Stochastic rate (probability) for dropping an activation
+      value when applying dropout after the embedding block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask. Sharing
+      along batch and sequence axes (`dropout_shared_axes=(0,1)`) is a useful
+      way to save memory and apply consistent masks to activation vectors at
+      different sequence positions.
+    max_len: Maximum symbol length for positional encoding.
+    output_vocab_size: If specified, gives the vocabulary size for the targets;
+      if None, then input and target integers (token IDs) are assumed to come
+      from the same vocabulary.
+    axial_pos_shape: tuple of ints: input shape to use for the axial position
+      encoding. If unset, axial position encoding is disabled.
+    d_axial_pos_embs: tuple of ints: depth of position embedding for each axis.
+      Tuple length must match axial_pos_shape, and values must sum to d_model.
+
+  Returns:
+    A tuple of (input encoder, output encoder, output vocab size used).
+  """
+  # tokens --> vectors
+  def Embedder(vocab_size, embedding_mode):
+    return [
+        (tl.Embedding(vocab_size, d_model) if vocab_size is not None
+         else tl.Dense(d_model)),
+        tl.Dropout(rate=embedding_dropout,
+                   shared_axes=dropout_shared_axes,
+                   mode=embedding_mode),
+    ]
+
+  # NOTE: Positional encodings are not shared between encoder and decoder.
+
+  # Since encoder doesn't run stepwise, we do not use predict mode there.
+  encoder_mode = 'eval' if mode == 'predict' else mode
+  in_embedder = Embedder(input_vocab_size, encoder_mode)
+  in_encoder = in_embedder + [
+      PositionalEncoder(encoder_mode,
+                        dropout=embedding_dropout,
+                        max_len=max_len,
+                        axial_pos_shape=axial_pos_shape,
+                        d_axial_pos_embs=d_axial_pos_embs)
+  ]
+
+  # If output_vocab_size is None, we reuse the same embedding matrix, otherwise
+  # we initialize one.
+  if output_vocab_size is None:
+    out_embedder = in_embedder
+  else:
+    out_embedder = Embedder(output_vocab_size, mode)
+
+  out_encoder = out_embedder + [
+      PositionalEncoder(mode,
+                        dropout=embedding_dropout,
+                        max_len=max_len,
+                        axial_pos_shape=axial_pos_shape,
+                        d_axial_pos_embs=d_axial_pos_embs)
+  ]
+
+  # Set this to the value actually used.
+  if output_vocab_size is None:
+    output_vocab_size = input_vocab_size
+
+  return in_encoder, out_encoder, output_vocab_size
+
+
 def ConfigurableTransformerEncoder(vocab_size,
                                    n_classes=10,
                                    d_model=512,
@@ -152,7 +277,9 @@ def ConfigurableTransformerEncoder(vocab_size,
                                    ff_sparsity=0,
                                    ff_sparsity_type='1inN',
                                    attention_chunk_size=0,
-                                   attention_type=tl.Attention):
+                                   attention_type=tl.Attention,
+                                   axial_pos_shape=None,
+                                   d_axial_pos_embs=None):
   """Returns a Transformer encoder merged with an N-way categorization head.
 
   This model performs text categorization:
@@ -199,6 +326,10 @@ def ConfigurableTransformerEncoder(vocab_size,
       use BlockSparseFF if ff_sparsity_type=`'Block'`
     attention_chunk_size: int, if > 0 run attention chunked at this size
     attention_type: The attention layer to use for the encoder part.
+    axial_pos_shape: tuple of ints: input shape to use for the axial position
+      encoding. If unset, axial position encoding is disabled.
+    d_axial_pos_embs: tuple of ints: depth of position embedding for each axis.
+      Tuple length must match axial_pos_shape, and values must sum to d_model.
 
   Returns:
     A Transformer model that maps strings (conveyed via token IDs) to
@@ -207,15 +338,16 @@ def ConfigurableTransformerEncoder(vocab_size,
   positional_encoder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
-      tl.PositionalEncoding(max_len=max_len)
+      PositionalEncoder(
+          mode, dropout, max_len, axial_pos_shape, d_axial_pos_embs)
   ]
 
   # pylint: disable=g-complex-comprehension
   encoder_blocks = [
-      _EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
-                    ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
-                    ff_sparsity, ff_sparsity_type,
-                    attention_chunk_size, attention_type)
+      EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
+                   ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
+                   ff_sparsity, ff_sparsity_type,
+                   attention_chunk_size, attention_type)
       for i in range(n_layers)
   ]
   # pylint: enable=g-complex-comprehension
@@ -252,7 +384,9 @@ def ConfigurableTransformerLM(vocab_size,
                               ff_sparsity=0,
                               ff_sparsity_type='1inN',
                               attention_chunk_size=0,
-                              attention_type=tl.CausalAttention):
+                              attention_type=tl.CausalAttention,
+                              axial_pos_shape=None,
+                              d_axial_pos_embs=None):
   """Returns a Transformer language model.
 
   This model performs autoregressive language modeling:
@@ -300,6 +434,10 @@ def ConfigurableTransformerLM(vocab_size,
       use BlockSparseFF if ff_sparsity_type=`'Block'`
     attention_chunk_size: int, if > 0 run attention chunked at this size
     attention_type: The attention layer to use for the decoder part.
+    axial_pos_shape: tuple of ints: input shape to use for the axial position
+      encoding. If unset, axial position encoding is disabled.
+    d_axial_pos_embs: tuple of ints: depth of position embedding for each axis.
+      Tuple length must match axial_pos_shape, and values must sum to d_model.
 
   Returns:
     A Transformer language model as a layer that maps from a tensor of tokens
@@ -308,15 +446,16 @@ def ConfigurableTransformerLM(vocab_size,
   positional_encoder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
-      tl.PositionalEncoding(max_len=max_len, mode=mode)
+      PositionalEncoder(
+          mode, dropout, max_len, axial_pos_shape, d_axial_pos_embs)
   ]
 
   # pylint: disable=g-complex-comprehension
   decoder_blocks = [
-      _DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
-                    ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
-                    ff_sparsity, ff_sparsity_type,
-                    attention_chunk_size, attention_type)
+      DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
+                   ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
+                   ff_sparsity, ff_sparsity_type,
+                   attention_chunk_size, attention_type)
       for i in range(n_layers)
   ]
   # pylint: enable=g-complex-comprehension
@@ -351,7 +490,9 @@ def ConfigurableTransformer(input_vocab_size,
                             ff_sparsity_type='1inN',
                             attention_chunk_size=0,
                             encoder_attention_type=tl.Attention,
-                            encoder_decoder_attention_type=tl.CausalAttention):
+                            encoder_decoder_attention_type=tl.CausalAttention,
+                            axial_pos_shape=None,
+                            d_axial_pos_embs=None):
   """Returns a full Transformer model.
 
   This model is an encoder-decoder that performs tokenized string-to-string
@@ -414,41 +555,34 @@ def ConfigurableTransformer(input_vocab_size,
     encoder_attention_type: The attention layer to use for the encoder part.
     encoder_decoder_attention_type: The attention layer to use for the
       encoder-decoder attention.
+    axial_pos_shape: tuple of ints: input shape to use for the axial position
+      encoding. If unset, axial position encoding is disabled.
+    d_axial_pos_embs: tuple of ints: depth of position embedding for each axis.
+      Tuple length must match axial_pos_shape, and values must sum to d_model.
 
   Returns:
     A Transformer model as a layer that maps from a source-target tokenized
     text pair to activations over a vocab set.
   """
-
-  def Embedder(vocab_size):  # tokens --> vectors
-    return [
-        tl.Embedding(vocab_size, d_model),
-        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
-    ]
-
-  in_embedder = Embedder(input_vocab_size)
-  out_embedder = (
-      in_embedder if output_vocab_size is None else Embedder(output_vocab_size))
-
-  # Positional encodings are not shared between encoder and decoder.
-  # Since encoder doesn't run stepwise, we do not use predict mode there.
-  encoder_mode = 'eval' if mode == 'predict' else mode
-  in_encoder = in_embedder + [
-      tl.PositionalEncoding(max_len=max_len, mode=encoder_mode)
-  ]
-  out_encoder = out_embedder + [
-      tl.PositionalEncoding(max_len=max_len, mode=mode)
-  ]
-
-  if output_vocab_size is None:
-    output_vocab_size = input_vocab_size
+  in_encoder, out_encoder, output_vocab_size = (
+      EmbeddingAndPositionalEncodings(
+          input_vocab_size,
+          d_model,
+          mode,
+          dropout,
+          dropout_shared_axes,
+          max_len,
+          output_vocab_size=output_vocab_size,
+          axial_pos_shape=axial_pos_shape,
+          d_axial_pos_embs=d_axial_pos_embs)
+  )
 
   # pylint: disable=g-complex-comprehension
   encoder_blocks = [
-      _EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
-                    ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
-                    ff_sparsity, ff_sparsity_type,
-                    attention_chunk_size, encoder_attention_type)
+      EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
+                   ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
+                   ff_sparsity, ff_sparsity_type,
+                   attention_chunk_size, encoder_attention_type)
       for i in range(n_encoder_layers)
   ]
   # pylint: enable=g-complex-comprehension
@@ -459,10 +593,10 @@ def ConfigurableTransformer(input_vocab_size,
 
   # pylint: disable=g-complex-comprehension
   encoder_decoder_blocks = [
-      _EncoderDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
-                           mode, ff_activation, ff_dropout, ff_chunk_size,
-                           ff_use_sru, ff_sparsity, ff_sparsity_type,
-                           attention_chunk_size, encoder_decoder_attention_type)
+      EncoderDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+                          mode, ff_activation, ff_dropout, ff_chunk_size,
+                          ff_use_sru, ff_sparsity, ff_sparsity_type,
+                          attention_chunk_size, encoder_decoder_attention_type)
       for i in range(n_decoder_layers)
   ]
   # pylint: enable=g-complex-comprehension
@@ -493,10 +627,10 @@ def ConfigurableTransformer(input_vocab_size,
   )
 
 
-def _EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
-                  ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
-                  ff_sparsity, ff_sparsity_type,
-                  attention_chunk_size, attention_type):
+def EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
+                 ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
+                 ff_sparsity, ff_sparsity_type,
+                 attention_chunk_size, attention_type):
   """Returns a list of layers that implements a Transformer encoder block.
 
   The input to the block is a pair, (activations, mask), where the mask was
@@ -563,10 +697,10 @@ def _EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
   ]
 
 
-def _DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
-                  ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
-                  ff_sparsity, ff_sparsity_type,
-                  attention_chunk_size, attention_type):
+def DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
+                 ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
+                 ff_sparsity, ff_sparsity_type, attention_chunk_size,
+                 attention_type, n_attention_layers=1):
   """Returns a list of layers that implements a Transformer decoder block.
 
   The input is an activation tensor.
@@ -596,11 +730,14 @@ def _DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
       use BlockSparseFF if ff_sparsity_type=`'Block'`
     attention_chunk_size: int, if > 0 run attention chunked at this size
     attention_type: The attention layer to use.
+    n_attention_layers: how many residual causal attention layers should we
+      have before the feed-forward block (default: 1, the standard block)
 
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
-  causal_attention = ApplyAttentionLayer(
+  # pylint: disable=g-complex-comprehension
+  causal_attentions = [ApplyAttentionLayer(
       attention_type,
       d_model,
       n_heads,
@@ -611,30 +748,28 @@ def _DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
       attention_dropout=dropout,
       output_dropout=dropout,
       attention_chunk_size=attention_chunk_size,
-      mode=mode)
+      mode=mode) for _ in range(n_attention_layers)]
 
+  residual_attentions = [
+      tl.Residual(
+          tl.LayerNorm(),
+          causal_attentions[i],
+          tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
+      ) for i in range(n_attention_layers)]
+
+  # pylint: enable=g-complex-comprehension
   feed_forward = FeedForwardWithOptions(d_model, d_ff, dropout,
                                         dropout_shared_axes, ff_activation,
                                         ff_dropout, ff_chunk_size, ff_use_sru,
                                         ff_sparsity, mode, ff_sparsity_type)
 
-  dropout_ = tl.Dropout(
-      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
-
-  return [
-      tl.Residual(
-          tl.LayerNorm(),
-          causal_attention,
-          dropout_,
-      ),
-      tl.Residual(feed_forward),
-  ]
+  return residual_attentions + [tl.Residual(feed_forward)]
 
 
-def _EncoderDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
-                         mode, ff_activation, ff_dropout, ff_chunk_size,
-                         ff_use_sru, ff_sparsity, ff_sparsity_type,
-                         attention_chunk_size, attention_type):
+def EncoderDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+                        mode, ff_activation, ff_dropout, ff_chunk_size,
+                        ff_use_sru, ff_sparsity, ff_sparsity_type,
+                        attention_chunk_size, attention_type):
   """Returns a list of layers implementing a Transformer encoder-decoder block.
 
   The input is a triple (decoder_activations, mask, encoder_activiations) where

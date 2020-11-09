@@ -106,11 +106,13 @@ class Layer:
     self._name = name or self.__class__.__name__
     self._sublayers_to_print = sublayers_to_print
     self._sublayers = ()  # Default is no sublayers.
-    # This may run before some backends (e.g. JAX) are initialized, so we use
-    # Python `int` here instead of `fastmath.random.get_prng` (also note that
-    # different backends' `get_prng` may return different shapes so they can't
-    # be used interchangeably).
-    self._rng = random.randint(0, 2**31 - 1)
+
+    # The actual rng value/shape depends on the backend, which may not yet be
+    # initialized at the point this method is run. Hence, at first initialize
+    # only a seed random integer, in a backend-neutral way.
+    self._rng = None
+    self._rng_seed_int = random.randint(0, 2**31 - 1)
+
     # The private fields _weights and _state store the private part of
     # layer weights and state. When a layer has no sublayers, these are
     # the same as layer.weights and layer.state. For layers with sublayers
@@ -119,12 +121,14 @@ class Layer:
     # There is no need to use these fields in most user-implemented classes.
     self._weights = EMPTY_WEIGHTS  # By default no trainable weights.
     self._state = EMPTY_STATE  # By default no non-trainable state.
-    # Record root call site for custom error messages.
+
+    # Record layer creation site for use in LayerError messages.
+    # The frame can mutate, so copy relevant values out of it.
     frame = _find_frame(inspect.currentframe())
-    # Turns out that frame can mutate in time, so we just copy what we need.
     self._caller = {'filename': copy.copy(frame.f_code.co_filename),
                     'lineno': int(frame.f_lineno)}
     del frame  # Just in case.
+
     self._init_cached = False
     self._jit_cache = {}
 
@@ -460,10 +464,15 @@ class Layer:
 
   @property
   def rng(self):
-    """Returns a single-use random number generator without advancing it."""
-    # TODO(lukaszkaiser, jonni): be even more explicit that we're not advancing.
-    if isinstance(self._rng, int):
-      self._rng = fastmath.random.get_prng(self._rng)
+    """Returns this layer's current single-use random number generator.
+
+    Code that wants to base random samples on this generator must explicitly
+    split off new generators from it. (See, for example, the `rng` setter code
+    below.)
+    """
+    if self._rng is None:
+      # One-time initialization from backend-neutral seed int.
+      self._rng = fastmath.random.get_prng(self._rng_seed_int)
     return self._rng
 
   @rng.setter

@@ -16,6 +16,7 @@
 # Lint as: python3
 """Layers used for experiments with sparsity."""
 
+import functools
 import math
 import random as pyrandom
 import jax
@@ -248,6 +249,83 @@ def LowRankCausalAttention(d_feature, n_heads=1, dropout=0.0,  # pylint: disable
           mode=mode))
 
 
+@assert_shape('...a->...b')
+def MultiplicativeSparseDense(sparsity, d_input, d_output=None):  # pylint: disable=invalid-name
+  """Returns a replacement of Dense layer which uses less parameters.
+
+  The layer uses number of modules equal to `sparsity`. It multiplies each
+  dimension of the input tensor by a scalar specific to each dimension and each
+  module separately; then it applies Dense(d_output/sparsity) to each module.
+  Compared to standard dense layer, MultiplicativeSparseDense uses less
+  parameters while still being able to express many interesting functions (for
+  example a permutation).
+
+  Args:
+    sparsity: The sparsity of the layer; the output vector is divided into this
+        number of modules.
+    d_input: Dimensionality of input tensor.
+    d_output: Dimensionality of output tensor; by default equal to d_input.
+  """
+
+  assert d_output % sparsity == 0
+  d_module = d_output // sparsity
+
+  return tl.Serial(
+      # Weight below is used for per-head preprocessing of an embedding.
+      tl.Weights(init.RandomNormalInitializer(stddev=0.5),
+                 shape=[sparsity, d_input]),
+      # Weight below is dense kernel, shared across heads.
+      tl.Weights(init.GlorotUniformInitializer(), [d_input, d_module]),
+      # To save memory the per-head preprocessing and multiplying by the
+      # kernel is done in the same einsum.
+      tl.Fn('AttentionEinsum',
+            (lambda kernel, multiplier, embeds:  # pylint: disable=g-long-lambda
+             np.einsum('dx,hd,bld->blhx', kernel, multiplier, embeds))),
+      MergeLastTwoAxes(),
+      # Weight below is bias after dense, per-head.
+      tl.Weights(init.RandomNormalInitializer(1e-6), [d_output]),
+      tl.Add(),
+      )
+
+
+@assert_shape('...a->...a')
+def MultiplicativeModularSparseDense(sparsity, d_feature):  # pylint: disable=invalid-name
+  """Returns a replacement of Dense layer which uses less parameters.
+
+  The layer uses number of modules equal to `sparsity`. It is a combination of
+  multiplicative dense and locally connected dense layers.
+
+  Args:
+    sparsity: The sparsity of the layer; the output vector is divided into this
+        number of modules.
+    d_feature: Dimensionality of input and output tensor.
+  """
+
+  assert d_feature % sparsity == 0
+  d_module = d_feature // sparsity
+
+  return tl.Serial(
+      # Weight below is used for per-head preprocessing of an embedding.
+      tl.Weights(init.RandomNormalInitializer(stddev=0.5),
+                 shape=[sparsity, d_feature]),
+      # Weight below is a kernel of multiplicative dense, shared across heads.
+      tl.Weights(init.GlorotUniformInitializer(), [d_feature, d_module]),
+      # Weight below is a kernel of modular dense.
+      tl.Weights(functools.partial(init.GlorotUniformInitializer(),
+                                   nonreceptive_dims=[0]),
+                 [sparsity, d_module, d_module]),
+      # To save memory the per-head preprocessing and multiplying by
+      # kernels is done in a single einsum.
+      tl.Fn('SparseDenseEinsum',
+            (lambda kmod, kmult, multiplier, embeds:  # pylint: disable=g-long-lambda
+             np.einsum('hxo,dx,hd,bld->blho', kmod, kmult, multiplier, embeds))),
+      MergeLastTwoAxes(),
+      # Weight below is bias after dense, per-head.
+      tl.Weights(init.RandomNormalInitializer(1e-6), [d_feature]),
+      tl.Add(),
+      )
+
+
 @assert_shape('bld->bld')
 def MultiplicativeCausalAttention(d_feature, sparsity=1, n_heads=1, dropout=0.0,  # pylint: disable=invalid-name
                                   max_inference_length=2048, mode='train'):
@@ -270,31 +348,42 @@ def MultiplicativeCausalAttention(d_feature, sparsity=1, n_heads=1, dropout=0.0,
     max_inference_length: maximum length for inference.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
-  assert d_feature % sparsity == 0
-  d_module = d_feature // sparsity
-
-  @assert_shape('...a->...a')
-  def ProcessingLayer():  # pylint: disable=invalid-name
-    return tl.Serial(
-        # Weight below is used for per-head preprocessing of an embedding.
-        tl.Weights(init.RandomNormalInitializer(stddev=0.5),
-                   shape=[sparsity, d_feature]),
-        # Weight below is dense kernel, shared across heads.
-        tl.Weights(init.GlorotUniformInitializer(), [d_feature, d_module]),
-        # To save memory the per-head preprocessing and multiplying by the
-        # kernel is done in the same einsum.
-        tl.Fn('AttentionEinsum',
-              (lambda kernel, multiplier, embeds:  # pylint: disable=g-long-lambda
-               np.einsum('dx,hd,bld->blhx', kernel, multiplier, embeds))),
-        MergeLastTwoAxes(),
-        # Weight below is bias after dense, per-head.
-        tl.Weights(init.RandomNormalInitializer(1e-6), [d_feature]),
-        tl.Add(),
-        )
 
   return tl.ConfigurableAttention(
-      ProcessingLayer(), ProcessingLayer(), ProcessingLayer(),
-      ProcessingLayer(), n_heads=n_heads,
+      MultiplicativeSparseDense(sparsity, d_feature, d_feature),
+      MultiplicativeSparseDense(sparsity, d_feature, d_feature),
+      MultiplicativeSparseDense(sparsity, d_feature, d_feature),
+      MultiplicativeSparseDense(sparsity, d_feature, d_feature),
+      n_heads=n_heads, qkv_attention_layer=tl.DotProductCausalAttention(
+          dropout=dropout, max_inference_length=max_inference_length,
+          mode=mode))
+
+
+@assert_shape('bld->bld')
+def MultiplicativeModularCausalAttention(  # pylint: disable=invalid-name
+    d_feature, sparsity=1, n_heads=1, dropout=0.0, max_inference_length=2048,
+    mode='train'):
+  """Returns a layer that maps activations to activations, with causal masking.
+
+  Like `CausalAttention`, this layer type represents one pass of multi-head
+  self-attention with causal masking rather than padding-based masking. However,
+  for computing Q/K/V instead of a Dense layer it combines
+  MultiplicativeSparseDense layer with LocallyConnectedLayer.
+
+  Args:
+    d_feature: Depth/dimensionality of feature embedding.
+    sparsity: The sparsity of the layer; usually it should be equal to n_heads.
+    n_heads: Number of attention heads.
+    dropout: Probababilistic rate for internal dropout applied to attention
+        activations (based on query-key pairs) before dotting them with values.
+    max_inference_length: maximum length for inference.
+    mode: One of `'train'`, `'eval'`, or `'predict'`.
+  """
+  return tl.ConfigurableAttention(
+      MultiplicativeModularSparseDense(sparsity, d_feature),
+      MultiplicativeModularSparseDense(sparsity, d_feature),
+      MultiplicativeModularSparseDense(sparsity, d_feature),
+      MultiplicativeModularSparseDense(sparsity, d_feature), n_heads=n_heads,
       qkv_attention_layer=tl.DotProductCausalAttention(
           dropout=dropout, max_inference_length=max_inference_length,
           mode=mode))
