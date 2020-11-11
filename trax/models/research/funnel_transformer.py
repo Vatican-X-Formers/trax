@@ -276,7 +276,7 @@ def FunnelTransformer(vocab_size,
       tl.Parallel(
           # residual from first segment is taken before
           # normalization, so apply it now
-          None, tl.LayerNorm()), None,            # vecs norm(residual) masks
+          None, tl.LayerNorm(), None),            # vecs norm(residual) masks
       _Upsampler(),                               # vecs masks
       decoder_blocks,
       tl.Select([0], n_in=2),                     # vecs
