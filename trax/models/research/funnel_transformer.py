@@ -90,6 +90,8 @@ def _FunnelBlock(d_model, d_ff, n_heads,
           pass all values through unaltered.
       ff_activation: Type of activation function at the end of each block; must
           be an activation-type subclass of `Layer`.
+      pool_layer: Type of pooling layer used for downsampling;
+          should be `tl.AvgPool` or `tl.MaxPool`.
       pool_size: Shape of window that gets reduced to a single vector value.
           If the layer inputs are :math:`n`-dimensional arrays, then `pool_size`
           must be a tuple of length :math:`n-2`.
@@ -140,6 +142,63 @@ def FunnelTransformerEncoder(vocab_size,
                              strides=(2,),
                              separate_cls=True):
   """Returns a Funnel Encoder.
+
+
+  This model performs text categorization:
+
+    - input: rank 2 tensor representing a batch of text strings via token IDs
+      plus padding markers; shape is (batch_size, sequence_length). The tensor
+      elements are integers in `range(vocab_size)`, and `0` values mark padding
+      positions.
+
+    - output: rank 2 tensor representing a batch of log-probability
+      distributions over N categories; shape is (batch_size, `n_classes`).
+
+  Args:
+    vocab_size: Input vocabulary size -- each element of the input tensor
+        should be an integer in `range(vocab_size)`. These integers typically
+        represent token IDs from a vocabulary-based tokenizer.
+    n_classes: Final dimension of the output tensors, representing N-way
+        classification.
+    d_model: Final dimension of tensors at most points in the model, including
+        the initial embedding output.
+    d_ff: Size of special dense layer in the feed-forward part of each encoder
+        block.
+    encoder_segment_lengths: Tuple, where each element denotes the number of
+        transformer encoder blocks preceding a funnel transformer block.
+        There is no funnel block after the last sequence of encoder blocks,
+        therefore the total number of blocks in the model is equal to
+        `sum(encoder_segment_lengths) + len(encoder_segment_lengths) - 1`.
+    n_heads: Number of attention heads.
+    max_len: Maximum symbol length for positional encoding.
+    dropout: Stochastic rate (probability) for dropping an activation value
+        when applying dropout within an encoder block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
+    mode: If `'train'`, each encoder block will include dropout; else, it will
+        pass all values through unaltered.
+    ff_activation: Type of activation function at the end of each encoder
+        block; must be an activation-type subclass of `Layer`.
+    pool_layer: Type of pooling layer used for downsampling in each of the
+        funnel blocks; should be `tl.AvgPool` or `tl.MaxPool`.
+    pool_size: Shape of window that gets reduced to a single vector value.
+        If the layer inputs are :math:`n`-dimensional arrays, then `pool_size`
+        must be a tuple of length :math:`n-2`.
+    strides: Offsets from the location of one window to the locations of
+        neighboring windows along each axis. If specified, must be a tuple of
+        the same length as `pool_size`. If None, then offsets of 1 along each
+        window axis, :math:`(1, ..., 1)`, will be used.
+    separate_cls: If `True`, pooling in funnel blocks is not applied to
+        embeddings of the first token (`cls` from BERT paper) and only final
+        embedding of this token is used for categorization - the rest are
+        discarded. If `False`, each token from the beginning is pooled and
+        all embeddings are averaged and mapped to output categories like in
+        original `TransformerEncoder` model.
+  Returns:
+    A Transformer model that maps strings (conveyed via token IDs) to
+    probability-like activations over a range of output classes.
   """
   assert encoder_segment_lengths
 
