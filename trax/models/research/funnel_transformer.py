@@ -249,7 +249,7 @@ def _FunnelResidualBlock(d_model, d_ff, n_heads,
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
 
-  dropout = tl.Dropout(
+  dropout_layer = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   attention = tl.AttentionQKV(d_model, n_heads=n_heads, dropout=dropout,
@@ -266,7 +266,7 @@ def _FunnelResidualBlock(d_model, d_ff, n_heads,
           tl.Select([0, 1, 1, 2]),
           attention,
           tl.Parallel(None, mask_pooling),
-          dropout
+          dropout_layer
       ),
       tl.Residual(
           feed_forward
