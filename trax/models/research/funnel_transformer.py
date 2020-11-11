@@ -273,7 +273,7 @@ def FunnelTransformer(vocab_size,
       positions.
 
     - output: rank 3 tensor representing a batch of log-probability
-      distributions over N categories for each token; shape is
+      distributions over `vocab_size` categories for each token; shape is
       (batch_size, sequence_length, vocab_size).
 
 
