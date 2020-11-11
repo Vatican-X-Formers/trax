@@ -220,10 +220,11 @@ def FunnelTransformerEncoder(vocab_size,
 
     # If not last segment, add funnel block
     if i != n_encoder_segments - 1:
-      encoder_blocks.append(_FunnelBlock(d_model, d_ff, n_heads, dropout,
-                                         dropout_shared_axes, mode,
-                                         ff_activation, pool_layer, pool_size,
-                                         strides, separate_cls))
+      encoder_blocks.append(
+        _FunnelResidualBlock(d_model, d_ff, n_heads, dropout,
+                             dropout_shared_axes, mode,
+                             ff_activation, pool_layer, pool_size,
+                             strides, separate_cls))
 
   cls_pooling = SelectFirst() if separate_cls else tl.Mean(axis=1)
 
@@ -245,28 +246,28 @@ def FunnelTransformerEncoder(vocab_size,
 
 def _FunnelResidualBlock(d_model, d_ff, n_heads,
                          dropout, dropout_shared_axes, mode, ff_activation,
-                         pool_layer, pool_size, strides):
+                         pool_layer, pool_size, strides, separate_cls):
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
 
-  dropout_layer = tl.Dropout(
+  hidden_dropout = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   attention = tl.AttentionQKV(d_model, n_heads=n_heads, dropout=dropout,
                               mode=mode)
 
-  pooling = PoolLayer(pool_layer, pool_size, strides)
+  pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
 
-  mask_pooling = MaskPool()
+  mask_pooling = MaskPool(pool_size, strides, separate_cls)
 
   return [
-      tl.Parallel(tl.Branch(pooling, None), None),
+      tl.LayerNorm(),
+      tl.Branch(pooling, None),
       tl.Residual(
-          tl.Parallel(tl.LayerNorm(), tl.LayerNorm()),
           tl.Select([0, 1, 1, 2]),
           attention,
           tl.Parallel(None, mask_pooling),
-          dropout_layer
+          hidden_dropout
       ),
       tl.Residual(
           feed_forward
@@ -310,11 +311,11 @@ def FunnelTransformer(vocab_size,
 
     # Add funnel block between segments
     encoder_blocks_from_first_pooling.append(
-        _FunnelBlock(d_model, d_ff, n_heads, dropout,
-                     dropout_shared_axes, mode,
-                     ff_activation, pool_layer,
-                     pool_size=pool_size, strides=pool_size,
-                     separate_cls=separate_cls))
+        _FunnelResidualBlock(d_model, d_ff, n_heads, dropout,
+                             dropout_shared_axes, mode,
+                             ff_activation, pool_layer,
+                             pool_size=pool_size, strides=pool_size,
+                             separate_cls=separate_cls))
 
     for _ in range(encoder_segment_lengths[i]):
       # Create segment_size encoder blocks
