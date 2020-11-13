@@ -90,3 +90,5 @@ FunnelTransformerEncoder = model_configure(
     funnel_transformer.FunnelTransformerEncoder)
 FunnelTransformer = model_configure(
     funnel_transformer.FunnelTransformer)
+FunnelTransformerLM = model_configure(
+    funnel_transformer.FunnelTransformerLM)
