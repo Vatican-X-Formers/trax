@@ -519,7 +519,7 @@ def FunnelTransformerLM(vocab_size,
       positional_encoder,        # vecs
       pre_decoder_blocks,            # vecs
       tl.Residual(
-          tl.ShiftRight(n_positions=total_shorten_factor - 1),
+          # tl.ShiftRight(n_positions=total_shorten_factor - 1),
           funnel_blocks,
           _UpsamplerLM(total_shorten_factor)
       ),
