@@ -533,6 +533,7 @@ def FunnelTransformerLM(vocab_size,
 def _UFunnelValley(d_model,
                     d_ff,
                     encoder_segment_lengths,
+                    shorten_factor,
                     n_heads,
                     dropout,
                     dropout_shared_axes,
@@ -552,13 +553,26 @@ def _UFunnelValley(d_model,
     if n == 1:
         return [encoder_blocks]
 
+    def create_decoder_blocks(n_layers):
+        return [
+            # pylint: disable=g-complex-comprehension
+            _DecoderBlock(d_model, d_ff, n_heads,
+                        dropout, dropout_shared_axes, mode, ff_activation)
+            for _ in range(n_layers)]
+
+    funnel_block = [_FunnelDecoderBlock(
+      shorten_factor[0], d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+      mode, ff_activation
+    )] + create_decoder_blocks(encoder_segment_lengths[0])
+
     return [
         encoder_blocks,
+        funnel_block,
         tl.Residual(
-            *_UFunnelValley(d_model, d_ff, encoder_blocks[1:], n_heads,
-                dropout, dropout_shared_axes, mode, ff_activation)
+            *_UFunnelValley(d_model, d_ff, encoder_blocks[1:], shorten_factor[1:],
+             n_heads, dropout, dropout_shared_axes, mode, ff_activation)
         ),
-        encoder_blocks
+        #upsampler
     ]
 
 def UFunnel(vocab_size,
