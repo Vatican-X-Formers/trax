@@ -528,3 +528,79 @@ def FunnelTransformerLM(vocab_size,
       tl.Dense(vocab_size),      # vecs
       tl.LogSoftmax(),           # vecs
   )
+
+
+def _UFunnelValley(d_model,
+                    d_ff,
+                    encoder_segment_lengths,
+                    n_heads,
+                    dropout,
+                    dropout_shared_axes,
+                    mode,
+                    ff_activation):
+    
+    n = len(encoder_segment_lengths)
+    assert n
+    encoder_blocks = []
+
+    for _ in range(encoder_segment_lengths[0]):
+      # Create segment_size encoder blocks
+      encoder_blocks.append(
+          _EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+                        mode, ff_activation))
+                    
+    if n == 1:
+        return [encoder_blocks]
+
+    return [
+        encoder_blocks,
+        tl.Residual(
+            *_UFunnelValley(d_model, d_ff, encoder_blocks[1:], n_heads,
+                dropout, dropout_shared_axes, mode, ff_activation)
+        ),
+        encoder_blocks
+    ]
+
+def UFunnel(vocab_size,
+            d_model=512,
+            d_ff=2048,
+            encoder_segment_lengths=(2, 2, 2),
+            n_heads=8,
+            max_len=2048,
+            dropout=0.1,
+            dropout_shared_axes=None,
+            mode='train',
+            ff_activation=tl.Relu,
+            pool_layer=tl.AvgPool,
+            pool_size=(2,),
+            separate_cls=True):
+
+  assert encoder_segment_lengths
+
+  positional_encoder = [
+      tl.Embedding(vocab_size, d_model),
+      tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
+      tl.PositionalEncoding(max_len=max_len)]
+
+  encoder_blocks_before_first_pooling = [
+      _EncoderBlock(d_model, d_ff, n_heads, dropout,
+                    dropout_shared_axes, mode, ff_activation)
+      for _ in range(encoder_segment_lengths[0])]
+
+
+  # Assemble and return the model.
+  return tl.Serial(                               # toks
+      tl.Branch(
+          positional_encoder, tl.PaddingMask()),  # vecs masks
+      encoder_blocks_before_first_pooling,        # vecs masks
+      tl.Select([0, 1, 0, 1]),                    # vecs masks vecs masks
+      
+      _UFunnelValley(d_model, d_ff, encoder_segment_lengths,
+                     n_heads, dropout, dropout_shared_axes,
+                     mode, ff_activation),
+
+      tl.Select([0], n_in=2),                     # vecs
+      tl.LayerNorm(),
+      tl.Dense(vocab_size),
+      tl.LogSoftmax()
+  )
