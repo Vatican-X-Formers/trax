@@ -65,9 +65,9 @@ def SelectFirst():
 def _Upsampler(total_pool_size, separate_cls):
   def _Upsample(short, long):
     if separate_cls:
-      upsampled_short = jnp.append(
-          short[:, :1, :],
-          short[:, 1:, :].repeat(total_pool_size, axis=1),
+      upsampled_short = jnp.concatenate(
+          (short[:, :1, :],
+           short[:, 1:, :].repeat(total_pool_size, axis=1)),
           axis=1)
       return index_add(
           long,
@@ -362,7 +362,7 @@ def FunnelTransformer(vocab_size,
                                   dropout_shared_axes, mode, ff_activation)
                     for _ in range(n_decoder_blocks)]
 
-  total_pool_size = pool_size * (len(encoder_segment_lengths) - 1)
+  total_pool_size = pool_size[0] ** (len(encoder_segment_lengths) - 1)
 
   # Assemble and return the model.
   return tl.Serial(                               # toks
