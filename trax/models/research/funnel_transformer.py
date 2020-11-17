@@ -80,6 +80,7 @@ def _Upsampler(total_pool_size, separate_cls):
       return long + upsampled_short
   return tl.Fn('Upsampler', _Upsample)
 
+
 def _FunnelBlock(d_model, d_ff, n_heads,
                  dropout, dropout_shared_axes, mode, ff_activation,
                  pool_layer, pool_size, strides, separate_cls):
