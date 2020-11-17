@@ -78,6 +78,7 @@ def _Upsampler(total_pool_size, separate_cls):
     else:
       upsampled_short = short.repeat(total_pool_size, axis=1)
       return long + upsampled_short
+
   return tl.Fn('Upsampler', _Upsample)
 
 
