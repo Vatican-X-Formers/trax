@@ -24,6 +24,7 @@ from trax.models.transformer import _EncoderBlock, _FeedForwardBlock
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
 
+
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
               pool_size=(2,),
