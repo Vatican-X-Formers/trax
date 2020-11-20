@@ -532,7 +532,7 @@ def FunnelTransformerLM(vocab_size,
 
 def _UFunnelValley(d_model,
                     d_ff,
-                    encoder_segment_lengths,
+                    segment_lengths,
                     shorten_factor,
                     n_heads,
                     dropout,
@@ -540,45 +540,43 @@ def _UFunnelValley(d_model,
                     mode,
                     ff_activation):
     
-    n = len(encoder_segment_lengths)
+    n = len(segment_lengths)
     assert n
-    encoder_blocks = []
+    if shorten_factor != 2:
+        raise ValueError('Only shorten factor == 2 is supported.')
 
-    for _ in range(encoder_segment_lengths[0]):
-      # Create segment_size encoder blocks
-      encoder_blocks.append(
-          _EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
-                        mode, ff_activation))
+    current_len = segment_lengths[0]
+
+    decoder_blocks = [
+        _DecoderBlock(d_model, d_ff, n_heads,
+                    dropout, dropout_shared_axes, mode, ff_activation)
+        for _ in range(current_len)]
                     
     if n == 1:
-        return [encoder_blocks]
+        return [decoder_blocks]
 
-    def create_decoder_blocks(n_layers):
-        return [
-            # pylint: disable=g-complex-comprehension
-            _DecoderBlock(d_model, d_ff, n_heads,
-                        dropout, dropout_shared_axes, mode, ff_activation)
-            for _ in range(n_layers)]
-
-    funnel_block = [_FunnelDecoderBlock(
-      shorten_factor[0], d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+    funnel_block = _FunnelDecoderBlock(
+      shorten_factor, d_model, d_ff, n_heads, dropout, dropout_shared_axes,
       mode, ff_activation
-    )] + create_decoder_blocks(encoder_segment_lengths[0])
+    )
 
     return [
-        encoder_blocks,
-        funnel_block,
+        decoder_blocks,
         tl.Residual(
-            *_UFunnelValley(d_model, d_ff, encoder_blocks[1:], shorten_factor[1:],
-             n_heads, dropout, dropout_shared_axes, mode, ff_activation)
+            tl.ShiftRight(n_positions=shorten_factor-1, mode=mode),
+            funnel_block,
+            *_UFunnelValley(d_model, d_ff, segment_lengths[1:], shorten_factor,
+             n_heads, dropout, dropout_shared_axes, mode, ff_activation),
+            _UpsamplerLM(shorten_factor)
         ),
-        #upsampler
+        decoder_blocks
     ]
 
 def UFunnel(vocab_size,
             d_model=512,
             d_ff=2048,
-            encoder_segment_lengths=(2, 2, 2),
+            segment_lengths=(2, 2, 2),
+            shorten_factor=2,
             n_heads=8,
             max_len=2048,
             dropout=0.1,
@@ -589,32 +587,24 @@ def UFunnel(vocab_size,
             pool_size=(2,),
             separate_cls=True):
 
-  assert encoder_segment_lengths
+  assert segment_lengths
+  if shorten_factor != 2:
+    raise ValueError('Only shorten_factor==2 supported')
 
   positional_encoder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
-      tl.PositionalEncoding(max_len=max_len)]
-
-  encoder_blocks_before_first_pooling = [
-      _EncoderBlock(d_model, d_ff, n_heads, dropout,
-                    dropout_shared_axes, mode, ff_activation)
-      for _ in range(encoder_segment_lengths[0])]
-
+      tl.PositionalEncoding(max_len=max_len, mode=mode)]
 
   # Assemble and return the model.
-  return tl.Serial(                               # toks
-      tl.Branch(
-          positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks_before_first_pooling,        # vecs masks
-      tl.Select([0, 1, 0, 1]),                    # vecs masks vecs masks
-      
-      _UFunnelValley(d_model, d_ff, encoder_segment_lengths,
+  return tl.Serial(              # tokens (or chunked tuple of tokens)
+      tl.ShiftRight(mode=mode),  # toks
+      positional_encoder,        # vecs
+      _UFunnelValley(d_model, d_ff, segment_lengths, shorten_factor,
                      n_heads, dropout, dropout_shared_axes,
                      mode, ff_activation),
-
-      tl.Select([0], n_in=2),                     # vecs
-      tl.LayerNorm(),
-      tl.Dense(vocab_size),
-      tl.LogSoftmax()
+      tl.LayerNorm(),            # vecs
+      tl.Dense(vocab_size),      # vecs
+      tl.LogSoftmax(),           # vecs
   )
+
