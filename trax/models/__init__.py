@@ -93,3 +93,4 @@ FunnelTransformer = model_configure(
     funnel_transformer.FunnelTransformer)
 FunnelTransformerLM = model_configure(
     funnel_transformer.FunnelTransformerLM)
+UFunnel = model_configure(funnel_transformer.UFunnel)
