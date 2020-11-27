@@ -563,13 +563,13 @@ def FunnelTransformerLM(vocab_size,
       positional_encoder,        # vecs
       pre_decoder_blocks,            # vecs
       tl.Residual(
-          conv_layer,
           tl.ShiftRight(n_positions=total_shorten_factor - 1),
           funnel_blocks,
           _UpsamplerLM(total_shorten_factor)
       ),
       post_decoder_blocks,
-      tl.LayerNorm(),            # vecs
+      # tl.LayerNorm(),            # vecs
+      conv_layer,
       tl.Dense(vocab_size),      # vecs
       tl.LogSoftmax(),           # vecs
   )
