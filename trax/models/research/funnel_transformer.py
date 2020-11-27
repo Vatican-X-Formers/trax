@@ -573,3 +573,107 @@ def FunnelTransformerLM(vocab_size,
       tl.Dense(vocab_size),      # vecs
       tl.LogSoftmax(),           # vecs
   )
+
+
+def TransformerShortenLM(vocab_size,
+                         shorten_factor=1,
+                         d_embedding=256,
+                         d_model=512,
+                         d_ff=2048,
+                         n_layers=6,
+                         n_heads=8,
+                         dropout=0.1,
+                         max_len=2048,
+                         attention_type=tl.SelfAttention,
+                         ff_activation=tl.FastGelu,
+                         mode='train'):
+  """Reversible transformer language model with shortening.
+
+  When shorten_factor is F and processing an input of shape [batch, length],
+  we embed the (shifted-right) input and then group each F elements (on length)
+  into a single vector -- so that in the end we process a tensor of shape ::
+
+      [batch, length // F, d_model]
+
+  almost until the end -- at the end it's un-shortend and a SRU is applied.
+  This reduces the length processed inside the main model body, effectively
+  making the model faster but possibly slightly less accurate.
+
+  Args:
+    vocab_size: int: vocab size
+    shorten_factor: by how much to shorten, see above
+    d_embedding: the depth of the embedding layer and final logits
+    d_model: int:  depth of *each half* of the two-part features
+    d_ff: int: depth of feed-forward layer
+    d_attention_key: int: depth of key vector for each attention head
+    d_attention_value: int: depth of value vector for each attention head
+    n_layers: int: number of decoder layers
+    n_heads: int: number of attention heads
+    dropout: float: dropout rate (how much to drop out)
+    max_len: int: maximum symbol length for positional encoding
+    attention_type: class: attention class to use, such as SelfAttention.
+    axial_pos_shape: tuple of ints: input shape to use for the axial position
+      encoding. If unset, axial position encoding is disabled.
+    d_axial_pos_embs: tuple of ints: depth of position embedding for each axis.
+      Tuple length must match axial_pos_shape, values must sum to d_embedding.
+    ff_activation: the non-linearity in feed-forward layer
+    ff_use_sru: int; if > 0, we use this many SRU layers instead of feed-forward
+    ff_chunk_size: int; if > 0, chunk feed-forward into this-sized chunks
+    ff_sparsity: int, if > 0 use sparse feed-forward block with this sparsity
+    attention_chunk_size: int, if > 0 run attention chunked at this size
+    mode: str: 'train' or 'eval'
+
+  Returns:
+    the layer.
+  """
+  assert mode != 'predict'  # TODO(lukaszkaiser,kitaev): fast inference
+
+  positional_encoder = [
+      tl.Embedding(vocab_size, d_model),
+      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
+      tl.PositionalEncoding(max_len=max_len, mode=mode)]
+  decoder_blocks = []
+
+  if isinstance(attention_type, (tuple, list)):
+    assert n_layers % len(attention_type) == 0
+
+  for layer_idx in range(n_layers):
+    decoder_block = _DecoderBlock(
+        d_model, d_ff, n_heads,
+        dropout=dropout,
+        ff_activation=ff_activation,
+        dropout_shared_axes=[-2],
+        mode=mode)
+    decoder_blocks.append(decoder_block)
+
+  # pylint: disable=g-long-lambda
+  return tl.Serial(
+      tl.ShiftRight(),
+      positional_encoder,
+      tl.Dup(),              # Stack has (x, x), the first will be shortened
+      # Before shortening, we need to pad bypo shorten factor so as not to leak
+      # information into the future. To understand why, imagine shorten factor
+      # of 2 and sequence of length 4, so ABCD. If we shift just by 1, then we
+      # would have 0ABC, which gets grouped to [0A][BC] on input, which is
+      # predicting ABCD as targets. The problem is that [0A] has access to A
+      # and [BC] has access to C -- it will learn to copy it, peek into
+      # the future. Shifting twice to [00][AB] solves the problem as the first
+      # "big" symbol becomes all-0 and the rest is shifted enough.
+      tl.ShiftRight(n_positions=shorten_factor - 1),
+      tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
+          x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
+      tl.Dense(d_model),
+      tl.Residual(tl.Serial(decoder_blocks)),
+      tl.LayerNorm(),
+      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
+      tl.Dense(shorten_factor * d_embedding),
+      tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+          x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
+      tl.Concatenate(),  # Concatenate with just the embeddings.
+      tl.CausalConv(d_embedding),
+      tl.Relu(),
+      tl.SRU(d_embedding),  # One RNN layer for conditional dependence.
+      tl.Dense(vocab_size),
+      tl.LogSoftmax()
+  )
+  # pylint: enable=g-long-lambda
