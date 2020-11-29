@@ -27,6 +27,12 @@ from trax.models.research.funnel_attention import \
 from trax.models.transformer import _EncoderBlock, _FeedForwardBlock, \
   _DecoderBlock
 
+def print_and_return(args, label):
+    print(label, args.shape)
+    return args
+
+def IdPrint(label = None):
+  return tl.Fn('IdPrint', lambda x: print_and_return(x, label))
 
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
@@ -515,18 +521,29 @@ def FunnelTransformerLM(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
+      IdPrint('ENTRY: przed shiftem'), # przed shiftem (3, 6)
       tl.ShiftRight(mode=mode),  # toks
+      IdPrint('po shifcie'), # po shifcie (3, 6)
       positional_encoder,        # vecs
+      IdPrint('po postitional encoderze'), # po postitional encoderze (3, 6, 32)
       pre_decoder_blocks,            # vecs
+      IdPrint('pre decoder blocks'), # pre decoder blocks (3, 6, 32)
       tl.Residual(
           tl.ShiftRight(n_positions=total_shorten_factor - 1),
           funnel_blocks,
-          _UpsamplerLM(total_shorten_factor)
-      ),
+          _UpsamplerLM(total_shorten_factor),
+          IdPrint('po UPsamplerze') # po UPsamplerze (3, 6, 32)
+  ),
+      IdPrint('po residualu'), # po residualu (3, 6, 32)
       post_decoder_blocks,
+      IdPrint('po postdecoder ziomach'), # po postdecoder ziomach (3, 6, 32)
+
       tl.LayerNorm(),            # vecs
+      IdPrint('po layernormie'), # po layernormie (3, 6, 32)
       tl.Dense(vocab_size),      # vecs
+      IdPrint('po dense'), # po dense (3, 6, 16)
       tl.LogSoftmax(),           # vecs
+      IdPrint('po logsoftmaxie'), # po logsoftmaxie (3, 6, 16)
   )
 
 
@@ -562,14 +579,22 @@ def _UFunnelValley(d_model,
 
     return [
         decoder_blocks,
-        tl.Residual(
-            tl.ShiftRight(n_positions=shorten_factor-1, mode=mode),
-            funnel_block,
-            *_UFunnelValley(d_model, d_ff, segment_lengths[1:], shorten_factor,
-             n_heads, dropout, dropout_shared_axes, mode, ff_activation),
-            _UpsamplerLM(shorten_factor)
-        ),
-        decoder_blocks
+        #IdPrint(f'po decoder blokach poziomie [{n}]'),
+        #tl.Residual(
+        tl.ShiftRight(n_positions=shorten_factor-1, mode=mode),
+            #IdPrint(f'po shifcie righcie na [{n}]'),
+        funnel_block,
+            #IdPrint(f'po FUNNEL_BLOCK na [{n}]'),
+
+        *_UFunnelValley(d_model, d_ff, segment_lengths[1:], shorten_factor,
+            n_heads, dropout, dropout_shared_axes, mode, ff_activation),
+            #IdPrint(f'po valleyu niżej na [{n}]'),
+        _UpsamplerLM(shorten_factor),
+            #IdPrint(f'po UPSAMPLERZE na [{n}]'),
+        #),
+        #IdPrint(f'po valleyu na poziomie [{n}]'),
+        decoder_blocks,
+        #IdPrint(f'po decoder blokach na poziomie [{n}]'),
     ]
 
 def UFunnel(vocab_size,
@@ -578,7 +603,7 @@ def UFunnel(vocab_size,
             segment_lengths=(2, 2, 2),
             shorten_factor=2,
             n_heads=8,
-            max_len=2048,
+            max_len=3072,
             dropout=0.1,
             dropout_shared_axes=None,
             mode='train',
@@ -598,11 +623,14 @@ def UFunnel(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
+      #IdPrint('ENTRY przed wszystkim'), # po postitional encoderze (3, 6)
       tl.ShiftRight(mode=mode),  # toks
       positional_encoder,        # vecs
+      #IdPrint('po postitional encoderze'),  # po postitional encoderze (3, 6, 32)
       _UFunnelValley(d_model, d_ff, segment_lengths, shorten_factor,
                      n_heads, dropout, dropout_shared_axes,
                      mode, ff_activation),
+      #IdPrint('po valleyu'),  # po postitional encoderze (3,6,32)
       tl.LayerNorm(),            # vecs
       tl.Dense(vocab_size),      # vecs
       tl.LogSoftmax(),           # vecs
