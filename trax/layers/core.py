@@ -49,7 +49,8 @@ class Dense(base.Layer):
                n_units,
                kernel_initializer=init.GlorotUniformInitializer(),
                bias_initializer=init.RandomNormalInitializer(1e-6),
-               use_bias=True):
+               use_bias=True,
+               use_bfloat16=False):
     """Returns a dense (fully connected) layer of width `n_units`.
 
     A dense layer maps collections of `R^m` vectors to `R^n`, where `n`
@@ -65,12 +66,15 @@ class Dense(base.Layer):
           bias weights `b` for the layer.
       use_bias: If `True`, compute an affine map `y = Wx + b`; else compute
           a linear map `y = Wx`.
+      use_bfloat16: If `True`, use bfloat16 weights instead of the default
+        float32; this can save memory but may (rarely) lead to numerical issues.
     """
     super().__init__(name=f'Dense_{n_units}')
     self._n_units = n_units
     self._kernel_initializer = kernel_initializer
     self._bias_initializer = bias_initializer
     self._use_bias = use_bias
+    self._use_bfloat16 = use_bfloat16
 
   def forward(self, x):
     """Executes this layer as part of a forward pass through the model.
@@ -107,6 +111,8 @@ class Dense(base.Layer):
     shape_b = (self._n_units,)
     rng_w, rng_b = fastmath.random.split(self.rng, 2)
     w = self._kernel_initializer(shape_w, rng_w)
+    if self._use_bfloat16:
+      w = w.astype(jnp.bfloat16)
 
     if self._use_bias:
       b = self._bias_initializer(shape_b, rng_b)
@@ -119,7 +125,7 @@ class Dense(base.Layer):
 # dimension at the end. This dimension size corresponds to embedding depth.
 @assert_shape('...->...d')
 class Embedding(base.Layer):
-  """Trainable layer that maps discrete tokens/ids to vectors.
+  """Trainable layer that maps discrete tokens/IDs to vectors.
 
   Embedding layers are commonly used to map discrete data, like words in NLP,
   into vectors. Here is a canonical example::
@@ -142,9 +148,9 @@ class Embedding(base.Layer):
                                       distribution='uniform')):
     """Returns an embedding layer with given vocabulary size and vector size.
 
-    The layer clips input values (token ids) to the range `[0, vocab_size)`.
-    That is, negative token ids all clip to `0` before being mapped to a
-    vector, and token ids with value `vocab_size` or greater all clip to
+    The layer clips input values (token IDs) to the range `[0, vocab_size)`.
+    That is, negative token IDs all clip to `0` before being mapped to a
+    vector, and token IDs with value `vocab_size` or greater all clip to
     `vocab_size - 1` before being mapped to a vector.
 
     Args:
@@ -161,10 +167,10 @@ class Embedding(base.Layer):
     self._kernel_initializer = kernel_initializer
 
   def forward(self, x):
-    """Returns embedding vectors corresponding to input token id's.
+    """Returns embedding vectors corresponding to input token IDs.
 
     Args:
-      x: Tensor of token id's.
+      x: Tensor of token IDs.
 
     Returns:
       Tensor of embedding vectors.
@@ -564,6 +570,9 @@ def Exp():
 def LogSoftmax(axis=-1):
   """Returns a layer that applies log softmax along one tensor axis.
 
+  Note that the implementation actually computes x - LogSumExp(x),
+  which is mathematically equal to LogSoftmax(x).
+
   `LogSoftmax` acts on a group of values and normalizes them to look like a set
   of log probability values. (Probability values must be non-negative, and as
   a set must sum to 1. A group of log probability values can be seen as the
@@ -634,7 +643,7 @@ def Max(axis=-1, keepdims=False):
   return Fn('Max', lambda x: jnp.max(x, axis, keepdims=keepdims))
 
 
-def Sum(axis=-1, keepdims=False):
+def Sum(axis=None, keepdims=False):
   """Returns a layer that computes sums using one tensor axis.
 
   `Sum` uses one tensor axis to form groups of values and replaces each group
@@ -644,11 +653,26 @@ def Sum(axis=-1, keepdims=False):
   one.
 
   Args:
-    axis: Axis along which values are grouped for computing a sum.
+    axis: Axis along which values are grouped for computing a sum; if None,
+        compute sum over all elements in tensor.
     keepdims: If `True`, keep the resulting size 1 axis as a separate tensor
         axis; else, remove that axis.
   """
   return Fn('Sum', lambda x: jnp.sum(x, axis=axis, keepdims=keepdims))
+
+
+def ThresholdToBinary(threshold=.5):
+  """Returns a layer that thresholds inputs to yield outputs in {0, 1}."""
+  def f(model_output):  # pylint: disable=invalid-name
+    return (model_output > threshold).astype(jnp.int32)
+  return Fn('ThresholdToBinary', f)
+
+
+def ArgMax(axis=-1):
+  """Returns a layer that calculates argmax along the given axis."""
+  def f(model_output):  # pylint: disable=invalid-name
+    return jnp.argmax(model_output, axis=axis)
+  return Fn('ArgMax', f)
 
 
 @assert_shape('...->...')  # The output and input shapes are the same.

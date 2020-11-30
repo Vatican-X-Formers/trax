@@ -16,15 +16,13 @@
 # Lint as: python3
 """Tests for Funnel-Transformer models."""
 
-import numpy as np
-import trax
 from absl.testing import absltest
 from absl.testing import parameterized
+import numpy as np
 
-from trax import layers as tl, shapes
-from trax.models.research.funnel_transformer import PoolLayer, \
-  FunnelTransformerEncoder, \
-  FunnelTransformer
+from trax import layers as tl
+from trax import shapes
+import trax.models.research.funnel_transformer as ft
 
 
 class FunnelTransformerTest(parameterized.TestCase):
@@ -33,15 +31,44 @@ class FunnelTransformerTest(parameterized.TestCase):
     x = np.ones((1, 4, 1))
     x[0, :3, 0] = [5., 2., 4.]
 
-    pooling = PoolLayer(tl.AvgPool, (2,), (2,))
+    pooling = ft.PoolLayer(tl.AvgPool, (2,), (2,))
     y = pooling(x)
 
     self.assertEqual(y.shape, (1, 2, 1))
     self.assertEqual(y.tolist(), [[[5.], [3.]]])
 
+  def test_mask_pool(self):
+    x = np.array([1, 0, 0, 1], dtype=bool).reshape((1, 1, 1, 4))
+    pooling_cls = ft.MaskPool((2,), (2,))
+    y1 = pooling_cls(x)
+
+    self.assertEqual(y1.shape, (1, 1, 1, 2))
+    self.assertEqual(y1.squeeze().tolist(), [True, False])
+
+    pooling_without_cls = ft.MaskPool((2,), (2,), separate_cls=False)
+    y2 = pooling_without_cls(x)
+
+    self.assertEqual(y2.shape, (1, 1, 1, 2))
+    self.assertEqual(y2.squeeze().tolist(), [True, True])
+
+  def test_upsampler(self):
+    long = np.ones((1, 8, 1))
+    short = np.ones((1, 2, 1))
+    total_pool_size = long.shape[1] // short.shape[1]
+    up_cls = ft._Upsampler(total_pool_size, separate_cls=True)
+    up = ft._Upsampler(total_pool_size, separate_cls=False)
+
+    y_cls = up_cls([short, long])
+    y = up((short, long))
+    self.assertEqual(y_cls.shape, long.shape)
+    self.assertEqual(y.shape, long.shape)
+
+    self.assertEqual(y_cls.squeeze().tolist(), 5*[2] + 3*[1])
+    self.assertEqual(y.squeeze().tolist(), 8*[2])
+
   def test_funnel_block_forward_shape(self):
     n_even = 4
-    d_model = 32
+    d_model = 8
 
     x = np.ones((1, n_even, d_model), dtype=np.float)
     mask = np.ones((1, n_even), dtype=np.int32)
@@ -50,8 +77,8 @@ class FunnelTransformerTest(parameterized.TestCase):
     mask = masker(mask)
 
     block = tl.Serial(
-      *_FunnelResidualBlock(d_model, 64, 1, 0.1, None, 'train', tl.Relu,
-                            tl.AvgPool, (2,), (2,)))
+        ft._FunnelBlock(d_model, 8, 2, 0.1, None, 'train', tl.Relu,
+                        tl.AvgPool, (2,), (2,), separate_cls=True))
 
     xs = [x, mask]
     _, _ = block.init(shapes.signature(xs))
@@ -61,24 +88,34 @@ class FunnelTransformerTest(parameterized.TestCase):
     self.assertEqual(y.shape, (1, n_even // 2, d_model))
 
   def test_funnel_transformer_encoder_forward_shape(self):
-    n_classes = 4
-    trax.fastmath.disable_jit()
-    model = FunnelTransformerEncoder(3, n_classes, 16, 32)
+    n_classes = 5
+    model = ft.FunnelTransformerEncoder(2, n_classes=n_classes, d_model=8,
+                                        d_ff=8, encoder_segment_lengths=(1, 1),
+                                        n_heads=2, max_len=8)
 
-    x = np.ones((2, 64), dtype=np.int32)
+    batch_size = 2
+    n_tokens = 4
+    x = np.ones((batch_size, n_tokens), dtype=np.int32)
     _ = model.init(shapes.signature(x))
     y = model(x)
 
-    self.assertEqual(y.shape, (2, n_classes))
+    self.assertEqual(y.shape, (batch_size, n_classes))
 
   def test_funnel_transformer_forward_shape(self):
-    model = FunnelTransformer(10)
+    d_model = 8
+    vocab_size = 7
+    model = ft.FunnelTransformer(7, d_model=d_model, d_ff=8,
+                                 encoder_segment_lengths=(1, 1),
+                                 n_decoder_blocks=1, n_heads=2, max_len=8)
 
-    x = np.ones((3, 64), dtype=np.int32)
+    batch_size = 2
+    n_tokens = 4
+    x = np.ones((batch_size, n_tokens), dtype=np.int32)
     _ = model.init(shapes.signature(x))
     y = model(x)
 
-    self.assertEqual(y.shape, (3, 64, 512))
+    self.assertEqual(y.shape, (batch_size, n_tokens, vocab_size))
+
 
 if __name__ == '__main__':
   absltest.main()

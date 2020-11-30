@@ -32,6 +32,10 @@ from trax.layers import reversible
 from trax.layers.assert_shape import assert_shape
 
 
+# We use mixed CamelCase and snake_case names in this file.
+# pylint: disable=invalid-name
+
+
 @assert_shape('...->...')
 class ReversibleReshapePermute(reversible.ReversibleLayer):
   """Simple and fast, reversible, random-looking permutation layer.
@@ -127,19 +131,19 @@ class ReversibleRandomPermute(reversible.ReversibleLayer):
 
 
 @assert_shape('...a->...bc')
-def SplitLastAxis(num_splits):  # pylint: disable=invalid-name
+def SplitLastAxis(num_splits):
   return tl.Fn(f'SplitLastAxis_{num_splits}',
                lambda x: np.reshape(x, x.shape[:-1] + (num_splits, -1)))
 
 
 @assert_shape('...ab->...c')
-def MergeLastTwoAxes():  # pylint: disable=invalid-name
+def MergeLastTwoAxes():
   return tl.Fn('SplitLastAxis',
                lambda x: np.reshape(x, x.shape[:-2] + (-1,)))
 
 
 @assert_shape('...a->...b')
-def LocallyConnectedDense(n_modules, n_units, kernel_size=1,  # pylint: disable=invalid-name
+def LocallyConnectedDense(n_modules, n_units, kernel_size=1,
                           kernel_initializer=init.GlorotUniformInitializer(),
                           bias_initializer=init.RandomNormalInitializer(1e-6),
                           use_bias=True):
@@ -178,8 +182,8 @@ def LocallyConnectedDense(n_modules, n_units, kernel_size=1,  # pylint: disable=
 
 
 @assert_shape('bld->bld')
-def ModularCausalAttention(d_feature, n_heads=1, dropout=0.0,  # pylint: disable=invalid-name
-                           max_inference_length=2048, n_modules=1,
+def ModularCausalAttention(d_feature, n_heads=1, sparsity=None, dropout=0.0,
+                           max_inference_length=2048,
                            kernel_size=1, mode='train'):
   """Returns a layer that maps activations to activations, with causal masking.
 
@@ -190,22 +194,87 @@ def ModularCausalAttention(d_feature, n_heads=1, dropout=0.0,  # pylint: disable
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     n_heads: Number of attention heads.
+    sparsity: Number of modules used in LocallyConnectedDense.
     dropout: Probababilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
     max_inference_length: maximum length for inference.
-    n_modules: Number of modules used in LocallyConnectedDense.
     kernel_size: Kernel size used in LocallyConnectedDense.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
-
+  n_modules = n_heads if sparsity is None else sparsity
   @assert_shape('...a->...b')
-  def ProcessingLayer():  # pylint: disable=invalid-name
-    if n_modules == 1:
-      return tl.Dense(d_feature)
-    else:
-      assert d_feature % n_modules == 0
-      return LocallyConnectedDense(n_modules, d_feature // n_modules,
-                                   kernel_size=kernel_size)
+  def ProcessingLayer():
+    assert d_feature % n_modules == 0
+    return LocallyConnectedDense(n_modules, d_feature // n_modules,
+                                 kernel_size=kernel_size)
+
+  return tl.ConfigurableAttention(
+      ProcessingLayer(), ProcessingLayer(), ProcessingLayer(),
+      ProcessingLayer(), n_heads=n_heads,
+      qkv_attention_layer=tl.DotProductCausalAttention(
+          dropout=dropout, max_inference_length=max_inference_length,
+          mode=mode))
+
+
+@assert_shape('...a->...b')
+def LocallyConvDense(n_modules, n_units, kernel_size=1, length_kernel_size=1):
+  """Layer using local convolutions for approximation of Dense layer.
+
+  The layer splits the last axis of a tensor into `n_modules`, then runs
+  a convolution on all those modules, and concatenates their results.
+  It is similar to LocallyConnectedDense above, but shares weights.
+
+  Args:
+    n_modules: Indicates how many modules (pixels) should be input and output
+        split into for processing.
+    n_units: how many outputs (filters) should each module generate.
+    kernel_size: The size of the kernel to be used.
+    length_kernel_size: If > 1, also do causal convolution on the previous axis,
+      which is often the sentence length in sequence models.
+
+  Returns:
+      LocallyConvDense base.Layer.
+  """
+  if n_modules == 1:
+    return tl.Dense(n_units)
+  if kernel_size % 2 != 1:
+    raise ValueError('Currently we only handle odd kernel sizes.')
+  half = (kernel_size - 1) // 2
+  pad_widths = [[0, 0], [length_kernel_size - 1, 0], [half, half], [0, 0]]
+  return tl.Serial(
+      tl.SplitLastAxis(n_modules),
+      tl.Fn('Pad', lambda x: np.pad(x, pad_width=pad_widths)),
+      tl.Conv(n_units, kernel_size=(length_kernel_size, kernel_size)),
+      tl.MergeLastTwoAxes()
+  )
+
+
+@assert_shape('bld->bld')
+def ConvCausalAttention(d_feature, n_heads=1, sparsity=None, dropout=0.0,
+                        max_inference_length=2048,
+                        kernel_size=1, mode='train'):
+  """Returns a layer that maps activations to activations, with causal masking.
+
+  Like `CausalAttention`, this layer type represents one pass of multi-head
+  self-attention with causal masking rather than padding-based masking. However,
+  it uses LocallyConvDense instead of Dense layer for computing Q/K/V.
+
+  Args:
+    d_feature: Depth/dimensionality of feature embedding.
+    n_heads: Number of attention heads.
+    sparsity: Number of modules used in LocallyConvDense.
+    dropout: Probababilistic rate for internal dropout applied to attention
+        activations (based on query-key pairs) before dotting them with values.
+    max_inference_length: maximum length for inference.
+    kernel_size: Kernel size used in LocallyConnectedDense.
+    mode: One of `'train'`, `'eval'`, or `'predict'`.
+  """
+  n_modules = n_heads if sparsity is None else sparsity
+  @assert_shape('...a->...b')
+  def ProcessingLayer():
+    assert d_feature % n_modules == 0
+    return LocallyConvDense(n_modules, d_feature // n_modules,
+                            kernel_size=kernel_size)
 
   return tl.ConfigurableAttention(
       ProcessingLayer(), ProcessingLayer(), ProcessingLayer(),
@@ -216,7 +285,7 @@ def ModularCausalAttention(d_feature, n_heads=1, dropout=0.0,  # pylint: disable
 
 
 @assert_shape('bld->bld')
-def LowRankCausalAttention(d_feature, n_heads=1, dropout=0.0,  # pylint: disable=invalid-name
+def LowRankCausalAttention(d_feature, n_heads=1, dropout=0.0,
                            max_inference_length=2048, lowrank=64,
                            mode='train'):
   """Returns a layer that maps activations to activations, with causal masking.
@@ -235,7 +304,7 @@ def LowRankCausalAttention(d_feature, n_heads=1, dropout=0.0,  # pylint: disable
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
   @assert_shape('...a->...a')
-  def ProcessingLayer():  # pylint: disable=invalid-name
+  def ProcessingLayer():
     return tl.Serial(
         tl.Dense(lowrank),
         tl.Dense(d_feature)
@@ -250,7 +319,7 @@ def LowRankCausalAttention(d_feature, n_heads=1, dropout=0.0,  # pylint: disable
 
 
 @assert_shape('...a->...b')
-def MultiplicativeSparseDense(sparsity, d_input, d_output=None):  # pylint: disable=invalid-name
+def MultiplicativeSparseDense(sparsity, d_input, d_output=None):
   """Returns a replacement of Dense layer which uses less parameters.
 
   The layer uses number of modules equal to `sparsity`. It multiplies each
@@ -285,11 +354,11 @@ def MultiplicativeSparseDense(sparsity, d_input, d_output=None):  # pylint: disa
       # Weight below is bias after dense, per-head.
       tl.Weights(init.RandomNormalInitializer(1e-6), [d_output]),
       tl.Add(),
-      )
+  )
 
 
 @assert_shape('...a->...a')
-def MultiplicativeModularSparseDense(sparsity, d_feature):  # pylint: disable=invalid-name
+def MultiplicativeModularSparseDense(sparsity, d_feature):
   """Returns a replacement of Dense layer which uses less parameters.
 
   The layer uses number of modules equal to `sparsity`. It is a combination of
@@ -327,8 +396,9 @@ def MultiplicativeModularSparseDense(sparsity, d_feature):  # pylint: disable=in
 
 
 @assert_shape('bld->bld')
-def MultiplicativeCausalAttention(d_feature, sparsity=1, n_heads=1, dropout=0.0,  # pylint: disable=invalid-name
-                                  max_inference_length=2048, mode='train'):
+def MultiplicativeCausalAttention(d_feature, n_heads=1, sparsity=None,
+                                  dropout=0.0, max_inference_length=2048,
+                                  mode='train'):
   """Returns a layer that maps activations to activations, with causal masking.
 
   Like `CausalAttention`, this layer type represents one pass of multi-head
@@ -341,14 +411,14 @@ def MultiplicativeCausalAttention(d_feature, sparsity=1, n_heads=1, dropout=0.0,
 
   Args:
     d_feature: Depth/dimensionality of feature embedding.
-    sparsity: The sparsity of the layer; usually it should be equal to n_heads.
     n_heads: Number of attention heads.
+    sparsity: The sparsity of the layer; usually it should be equal to n_heads.
     dropout: Probababilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
     max_inference_length: maximum length for inference.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
-
+  sparsity = n_heads if sparsity is None else sparsity
   return tl.ConfigurableAttention(
       MultiplicativeSparseDense(sparsity, d_feature, d_feature),
       MultiplicativeSparseDense(sparsity, d_feature, d_feature),
@@ -360,8 +430,8 @@ def MultiplicativeCausalAttention(d_feature, sparsity=1, n_heads=1, dropout=0.0,
 
 
 @assert_shape('bld->bld')
-def MultiplicativeModularCausalAttention(  # pylint: disable=invalid-name
-    d_feature, sparsity=1, n_heads=1, dropout=0.0, max_inference_length=2048,
+def MultiplicativeModularCausalAttention(
+    d_feature, n_heads=1, sparsity=None, dropout=0.0, max_inference_length=2048,
     mode='train'):
   """Returns a layer that maps activations to activations, with causal masking.
 
@@ -372,13 +442,14 @@ def MultiplicativeModularCausalAttention(  # pylint: disable=invalid-name
 
   Args:
     d_feature: Depth/dimensionality of feature embedding.
-    sparsity: The sparsity of the layer; usually it should be equal to n_heads.
     n_heads: Number of attention heads.
+    sparsity: The sparsity of the layer; usually it should be equal to n_heads.
     dropout: Probababilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
     max_inference_length: maximum length for inference.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
+  sparsity = n_heads if sparsity is None else sparsity
   return tl.ConfigurableAttention(
       MultiplicativeModularSparseDense(sparsity, d_feature),
       MultiplicativeModularSparseDense(sparsity, d_feature),
@@ -389,7 +460,53 @@ def MultiplicativeModularCausalAttention(  # pylint: disable=invalid-name
           mode=mode))
 
 
-def CausalFavor(d_feature, n_heads=1, dropout=0.0,  # pylint: disable=invalid-name
+@assert_shape('bld->bld')
+def MultiplicativeConvCausalAttention(
+    d_feature, n_heads=1, sparsity=None, length_kernel_size=3,
+    dropout=0.0, max_inference_length=2048, mode='train'):
+  """Returns a layer that maps activations to activations, with causal masking.
+
+  Like `CausalAttention`, this layer type represents one pass of multi-head
+  self-attention with causal masking rather than padding-based masking. However,
+  for computing Q/K/V instead of a Dense layer it combines
+  MultiplicativeSparseDense layer with LocallyConvLayer.
+
+  Args:
+    d_feature: Depth/dimensionality of feature embedding.
+    n_heads: Number of attention heads.
+    sparsity: The sparsity of the layer; usually it should be equal to n_heads.
+    length_kernel_size: Size of convolution kernel on the length dimension.
+    dropout: Probababilistic rate for internal dropout applied to attention
+        activations (based on query-key pairs) before dotting them with values.
+    max_inference_length: maximum length for inference.
+    mode: One of `'train'`, `'eval'`, or `'predict'`.
+  """
+  sparsity = n_heads if sparsity is None else sparsity
+  d_module = d_feature // sparsity
+  return tl.Serial(
+      tl.Select([0, 0]),  # duplicate activations
+      MultiplicativeSparseDense(sparsity, d_feature, d_feature),  # shared q, k
+      tl.Select([0, 0, 0]),  # use for q, k, v
+      tl.Parallel(
+          [LocallyConvDense(sparsity, d_module, kernel_size=3,
+                            length_kernel_size=length_kernel_size),
+           tl.SplitIntoHeads(n_heads)],
+          [LocallyConvDense(sparsity, d_module, kernel_size=3,
+                            length_kernel_size=length_kernel_size),
+           tl.SplitIntoHeads(n_heads)],
+          [tl.Concatenate(),  # use permuted and original for v
+           LocallyConvDense(sparsity, d_module, kernel_size=1,
+                            length_kernel_size=length_kernel_size),
+           tl.SplitIntoHeads(n_heads)],
+      ),
+      tl.DotProductCausalAttention(
+          dropout=dropout, max_inference_length=max_inference_length,
+          mode=mode),
+      tl.MergeHeads(n_heads),
+  )
+
+
+def CausalFavor(d_feature, n_heads=1, dropout=0.0,
                 numerical_stabilizer=0.001, precision=None, mode='train'):
   """Returns a layer that maps activations to activations, with causal masking.
 
@@ -531,8 +648,8 @@ class SparseFF(base.Layer):
   """
 
   def __init__(self, d_ff, n_elements_in_block=32, d_lowrank=64,
-               temperature=0.7, mode='train',
-               kernel_initializer=init.GlorotUniformInitializer(),
+               temperature=0.1, quant_prob=0.3,
+               mode='train', kernel_initializer=init.GlorotUniformInitializer(),
                bias_initializer=init.RandomNormalInitializer(1e-6)):
     """Returns a sparse feed-forward block."""
     super().__init__(name=f'SparseFF_{d_ff}')
@@ -541,6 +658,7 @@ class SparseFF(base.Layer):
     self._d_lowrank = d_lowrank
     # Q: what temperature is actually most useful in training?
     self._temperature = temperature if mode == 'train' else 0.0
+    self._quant_prob = quant_prob
     self._n_elements_in_block = n_elements_in_block
     self._kernel_initializer = kernel_initializer
     self._bias_initializer = bias_initializer
@@ -583,11 +701,10 @@ class SparseFF(base.Layer):
       quant_mask = metrics.one_hot(quant_mask, self._n_elements_in_block)
       quant_mask = fastmath.stop_gradient(quant_mask)
       quant_mask += mask - fastmath.stop_gradient(mask)  # straight-through
-      # We will sometimes (50% of the batches) use the soft-mask instead of
-      # the quantized mask to improve training stability (see the paper above).
-      # Q: is selecting 50% of batches the best? Other %? Mixed in-batch?
-      select = fastmath.random.uniform(rng2, (), np.float32, -1.0, 1.0)
-      quant_mask = np.where(select > 0.0, quant_mask, mask)
+      # We will sometimes (quant_prob of the batches) use the soft-mask instead
+      # of the quantized mask to improve training stability (see paper above).
+      select = fastmath.random.uniform(rng2, (), np.float32, 0.0, 1.0)
+      quant_mask = np.where(select < self._quant_prob, quant_mask, mask)
       quant_mask = np.reshape(quant_mask, [-1, self._d_ff])
 
     if self._mode == 'train':

@@ -22,6 +22,11 @@ We welcome **contributions** to Trax! We welcome PRs with code for new models an
 
 
 
+Here are a few example notebooks:-
+
+* [**trax.data API explained**](https://github.com/SauravMaheshkar/Trax-Examples/blob/main/backend/trax-data-explained.ipynb) : Explains some of the major functions in the `trax.data` API
+* [**Named Entity Recognition using Reformer**](https://github.com/SauravMaheshkar/Trax-Examples/blob/main/NLP/NER%20using%20Reformer.ipynb) : Uses a [Kaggle dataset](https://www.kaggle.com/abhinavwalia95/entity-annotated-corpus) for implementing Named Entity Recognition using the [Reformer](https://arxiv.org/abs/2001.04451) architecture.
+* [**Deep N-Gram models**](https://github.com/SauravMaheshkar/Trax-Examples/blob/main/NLP/Deep%20N-Gram.ipynb) : Implementation of deep n-gram models trained on Shakespeares works
 
 **General Setup**
 
@@ -157,7 +162,7 @@ Layers are basic building blocks of Trax models. You will learn all about them i
 
 ```python
 class Embedding(base.Layer):
-  """Trainable layer that maps discrete tokens/ids to vectors."""
+  """Trainable layer that maps discrete tokens/IDs to vectors."""
 
   def __init__(self,
                vocab_size,
@@ -167,7 +172,7 @@ class Embedding(base.Layer):
 
     Args:
       vocab_size: Size of the input vocabulary. The layer will assign a unique
-          vector to each id in `range(vocab_size)`.
+          vector to each ID in `range(vocab_size)`.
       d_feature: Dimensionality/depth of the output vectors.
       kernel_initializer: Function that creates (random) initial vectors for
           the embedding.
@@ -178,10 +183,10 @@ class Embedding(base.Layer):
     self._kernel_initializer = kernel_initializer
 
   def forward(self, x):
-    """Returns embedding vectors corresponding to input token id's.
+    """Returns embedding vectors corresponding to input token IDs.
 
     Args:
-      x: Tensor of token id's.
+      x: Tensor of token IDs.
 
     Returns:
       Tensor of embedding vectors.

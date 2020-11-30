@@ -67,6 +67,7 @@ LayerNorm = layer_configure(LayerNorm)
 FilterResponseNorm = layer_configure(FilterResponseNorm)
 ThresholdedLinearUnit = layer_configure(ThresholdedLinearUnit)
 
+Attention = layer_configure(Attention, blacklist=['mode'])
 CausalAttention = layer_configure(CausalAttention, blacklist=['mode'])
 CausalFavor = layer_configure(CausalFavor, blacklist=['mode'])
 DotProductCausalAttention = layer_configure(
@@ -80,6 +81,8 @@ MultiplicativeCausalAttention = layer_configure(MultiplicativeCausalAttention,
                                                 blacklist=['mode'])
 MultiplicativeModularCausalAttention = layer_configure(
     MultiplicativeModularCausalAttention, blacklist=['mode'])
+MultiplicativeConvCausalAttention = layer_configure(
+    MultiplicativeConvCausalAttention, blacklist=['mode'])
 LSHSelfAttention = layer_configure(LSHSelfAttention, blacklist=['mode'])
 EncDecAttention = layer_configure(EncDecAttention, blacklist=['mode'])
 

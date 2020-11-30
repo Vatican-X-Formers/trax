@@ -29,7 +29,8 @@ from trax.models.research import transformer2 as t2
 def DecoderBlock(d_model, d_ff, d_attention_key, d_attention_value,
                  n_heads, attention_type, dropout, ff_activation,
                  ff_dropout, ff_use_sru, ff_chunk_size, ff_sparsity,
-                 attention_chunk_size, mode):
+                 attention_chunk_size, n_attention_layers=1,
+                 n_feedforward_layers=1, use_bfloat16=False, mode='train'):
   """Reversible transformer decoder layer.
 
   Args:
@@ -46,30 +47,35 @@ def DecoderBlock(d_model, d_ff, d_attention_key, d_attention_value,
     ff_chunk_size: int; if > 0, chunk feed-forward into this-sized chunks
     ff_sparsity: int, if > 0 use sparse feed-forward block with this sparsity
     attention_chunk_size: int, if > 0 run attention chunked at this size
+    n_attention_layers: how many residual causal attention layers should we
+      have before the feed-forward block (default: 1, the standard block)
+    n_feedforward_layers: how many FFNN layers should we have (default 1).
+    use_bfloat16: whether to use bfloat16 for weights (default: False).
     mode: str: 'train' or 'eval'
 
 
   Returns:
     the layer.
   """
-  attention = ct.ApplyAttentionLayer(
-      attention_type, d_model, n_heads, d_attention_key, d_attention_value,
-      True, False, dropout, dropout, attention_chunk_size, mode)
-  attention_half_residual = tl.ReversibleHalfResidual(
-      tl.LayerNorm(),
-      attention_layer=attention,
-  )
+  # pylint: disable=g-complex-comprehension
+  attention_half_residuals = [
+      [tl.ReversibleHalfResidual(
+          tl.LayerNorm(),
+          attention_layer=ct.ApplyAttentionLayer(
+              attention_type, d_model, n_heads, d_attention_key,
+              d_attention_value, True, False, dropout, dropout,
+              attention_chunk_size, mode)),
+       tl.ReversibleSwap()
+      ] for _ in range(n_attention_layers)]
 
-  feed_forward = ct.FeedForwardWithOptions(
-      d_model, d_ff, dropout, [-2], ff_activation, ff_dropout,
-      ff_chunk_size, ff_use_sru, ff_sparsity, mode)
-
-  return [
-      attention_half_residual,
-      tl.ReversibleSwap(),
-      tl.ReversibleHalfResidual(feed_forward),
-      tl.ReversibleSwap(),
-  ]
+  feed_forwards = [
+      [tl.ReversibleHalfResidual(ct.FeedForwardWithOptions(
+          d_model, d_ff, dropout, [-2], ff_activation, ff_dropout,
+          ff_chunk_size, ff_use_sru, ff_sparsity, mode, use_bfloat16)),
+       tl.ReversibleSwap()
+      ] for _ in range(n_feedforward_layers)]
+  # pylint: enable=g-complex-comprehension
+  return attention_half_residuals + feed_forwards
 
 
 def ReformerLM(vocab_size,
@@ -290,7 +296,7 @@ def ReformerShortenLM(vocab_size,
 
 def EncoderBlock(d_model, d_ff, n_heads, attention_type, dropout, ff_activation,
                  ff_dropout, ff_use_sru=0, ff_chunk_size=0, ff_sparsity=0,
-                 attention_chunk_size=0, mode='train'):
+                 attention_chunk_size=0, use_bfloat16=False, mode='train'):
   """Returns a list of layers that implements a Reformer encoder block.
 
   The input to the layer is a pair, (activations, mask), where the mask was
@@ -309,6 +315,7 @@ def EncoderBlock(d_model, d_ff, n_heads, attention_type, dropout, ff_activation,
     ff_chunk_size: int; if > 0, chunk feed-forward into this-sized chunks
     ff_sparsity: int, if > 0 use sparse feed-forward block with this sparsity
     attention_chunk_size: int, if > 0 run attention chunked at this size
+    use_bfloat16: whether to use bfloat16 for weights (default: False)
     mode: str: 'train' or 'eval'
 
   Returns:
@@ -325,6 +332,18 @@ def EncoderBlock(d_model, d_ff, n_heads, attention_type, dropout, ff_activation,
       d_qk=d_model//n_heads, d_v=d_model//n_heads, masked=True, causal=False,
       attention_dropout=dropout, output_dropout=dropout,
       attention_chunk_size=attention_chunk_size, mode=mode)
+  # TODO(lukaszkaiser): refactor efficient attention layers to unify the API
+  # If we're using standard attention, we need to pass reshaped mask and not
+  # return the mask to be compatible with the EfficientAttention API.
+  if attention.n_out == 2:
+    def reshape_mask(mask):
+      return jnp.reshape(mask, (mask.shape[0], 1, 1, mask.shape[1]))
+    attention = tl.Serial(
+        tl.Fn('ReshapeMask', lambda x, y: (x, reshape_mask(y)), n_out=2),
+        attention,
+        tl.Select([0], n_in=2)
+    )
+
   attention_half_residual = tl.ReversibleHalfResidual(
       tl.LayerNorm(),
       attention_layer=attention,
@@ -332,7 +351,7 @@ def EncoderBlock(d_model, d_ff, n_heads, attention_type, dropout, ff_activation,
 
   feed_forward = ct.FeedForwardWithOptions(
       d_model, d_ff, dropout, [-2], ff_activation, ff_dropout,
-      ff_chunk_size, ff_use_sru, ff_sparsity, mode)
+      ff_chunk_size, ff_use_sru, ff_sparsity, mode, use_bfloat16)
 
   return [
       attention_half_residual,
@@ -539,6 +558,8 @@ def Reformer2(input_vocab_size,
               ff_sparsity=0,
               attention_chunk_size=0,
               n_layers_forget=0,
+              n_decoder_attention_layers=2,
+              use_bfloat16=False,
               mode='train'):
   """Reversible transformer encoder-decoder model.
 
@@ -575,6 +596,8 @@ def Reformer2(input_vocab_size,
     ff_sparsity: int, if > 0 use sparse feed-forward block with this sparsity
     attention_chunk_size: int, if > 0 run attention chunked at this size
     n_layers_forget: how often to have a forgetting block between layers
+    n_decoder_attention_layers: how many attention layers in a decoder block
+    use_bfloat16: whether to use bfloat16 for weights (default: False)
     mode: str: 'train' or 'eval'
 
   Returns:
@@ -616,6 +639,7 @@ def Reformer2(input_vocab_size,
           ff_chunk_size=ff_chunk_size,
           ff_sparsity=ff_sparsity,
           attention_chunk_size=attention_chunk_size,
+          use_bfloat16=use_bfloat16,
           mode=mode)
       for _ in range(n_encoder_layers)]
   # pylint: enable=g-complex-comprehension
@@ -649,6 +673,8 @@ def Reformer2(input_vocab_size,
         ff_chunk_size=ff_chunk_size,
         ff_sparsity=ff_sparsity,
         attention_chunk_size=attention_chunk_size,
+        n_attention_layers=n_decoder_attention_layers,
+        use_bfloat16=use_bfloat16,
         mode=mode)
     decoder_blocks.append(decoder_block)
 

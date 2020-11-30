@@ -23,27 +23,17 @@ The "Transformer" name and network architecture were introduced in the paper
 from trax import layers as tl
 
 
-def FeedForward(d_model, d_ff, dropout, activation, act_dropout, mode):
+def _FeedForward(d_model, d_ff, dropout, activation, act_dropout,
+                 use_bfloat16, mode):
   """Feed-forward block with layer normalization at start."""
   if act_dropout is None:
     act_dropout = dropout
   return [
-      tl.LayerNorm(),
-      tl.Dense(d_ff),
+      tl.Dense(d_ff, use_bfloat16=use_bfloat16),
       tl.Dropout(rate=act_dropout, shared_axes=[-2], mode=mode),
       activation(),
-      tl.Dense(d_model),
-      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
+      tl.Dense(d_model, use_bfloat16=use_bfloat16),
   ]
-
-
-def ChunkedFeedForward(d_model, d_ff, dropout, activation, act_dropout,
-                       chunk_size, mode):
-  """Chunked feed-forward block with layer normalization at start."""
-  ff = FeedForward(d_model, d_ff, dropout, activation, act_dropout, mode)
-  if chunk_size < 1:
-    return ff
-  return tl.BatchLeadingAxes(tl.Chunk(tl.Serial(ff), chunk_size))
 
 
 def FeedForwardWithOptions(d_model,
@@ -56,6 +46,7 @@ def FeedForwardWithOptions(d_model,
                            ff_use_sru,
                            ff_sparsity,
                            mode,
+                           use_bfloat16=False,
                            ff_sparsity_type='1inN'):
   """Feed-Forward block with all the options.
 
@@ -75,9 +66,11 @@ def FeedForwardWithOptions(d_model,
       when applying dropout after the FF dense layer.
     ff_chunk_size: int; if > 0, chunk feed-forward into this-sized chunks
     ff_use_sru: int; if > 0, we use this many SRU layers instead of feed-forward
-    ff_sparsity: int, if > 0 use sparse feed-forward block with this sparsity
+    ff_sparsity: int, tuple or string; if not 0, use sparse feed-forward block
+      with this sparsity
     mode: If `'train'`, each block will include dropout; else, it will pass all
       values through unaltered.
+    use_bfloat16: whether to use bfloat16 for weights (default: False).
     ff_sparsity_type: string, if ff_sparsity >0,
       use SparseFF if ff_sparsity_type=`'1inN'` and
       use BlockSparseFF if ff_sparsity_type=`'Block'`
@@ -85,33 +78,41 @@ def FeedForwardWithOptions(d_model,
   Returns:
     A list of layers which maps vectors to vectors.
   """
-  if ff_use_sru:
-    return [tl.SRU(d_model) for _ in range(ff_use_sru)]
-  elif ff_sparsity and ff_sparsity_type == '1inN':
+  if ff_sparsity and ff_sparsity_type == '1inN':
+    temperature, quant_prob = 0.1, 0.3
+    if isinstance(ff_sparsity, str):
+      # This is hacky but used to pass ff_sparsity in yaml sweep files.
+      ff_sparsity = [(float(x) if '.' in x else int(x))
+                     for x in ff_sparsity.split()]
+    if isinstance(ff_sparsity, (list, tuple)):
+      if len(ff_sparsity) == 2:
+        n_elements_in_block, d_lowrank = ff_sparsity
+      else:
+        n_elements_in_block, d_lowrank, temperature, quant_prob = ff_sparsity
+    else:
+      assert isinstance(ff_sparsity, int)
+      n_elements_in_block, d_lowrank = ff_sparsity, d_ff // ff_sparsity
     ff = tl.SparseFF(
         d_ff,
-        n_elements_in_block=ff_sparsity,
-        d_lowrank=d_ff // ff_sparsity,
+        n_elements_in_block=n_elements_in_block,
+        d_lowrank=d_lowrank,
+        temperature=temperature,
+        quant_prob=quant_prob,
         mode=mode)
-    if ff_chunk_size < 1:
-      chunked_ff = ff
-    else:
-      chunked_ff = tl.BatchLeadingAxes(tl.Chunk(tl.Serial(ff), ff_chunk_size))
-    return [
-        tl.LayerNorm(), chunked_ff,
-        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
-    ]
   elif ff_sparsity and ff_sparsity_type == 'Block':
-    return [
-        tl.LayerNorm(),
-        tl.BlockSparseFF(d_ff, num_experts=ff_sparsity, mode=mode),
-        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
-    ]
+    ff = tl.BlockSparseFF(d_ff, num_experts=ff_sparsity, mode=mode),
   else:
-    return [
-        ChunkedFeedForward(d_model, d_ff, dropout, ff_activation, ff_dropout,
-                           ff_chunk_size, mode)
-    ]
+    ff = _FeedForward(d_model, d_ff, dropout, ff_activation, ff_dropout,
+                      use_bfloat16, mode)
+  res = [tl.LayerNorm(),
+         ff,
+         tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
+  if ff_chunk_size > 0:
+    res = tl.BatchLeadingAxes(tl.Chunk(tl.Serial(res), ff_chunk_size))
+  if ff_use_sru:
+    sru = [tl.Dense(32)] + [tl.SRU(32) for _ in range(ff_use_sru)]
+    res = tl.Residual(sru + [tl.Dense(d_model)], res)
+  return [res]
 
 
 # TODO(lukaszkaiser): unify attention layers API and remove this branch
@@ -627,10 +628,22 @@ def ConfigurableTransformer(input_vocab_size,
   )
 
 
-def EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
-                 ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
-                 ff_sparsity, ff_sparsity_type,
-                 attention_chunk_size, attention_type):
+def EncoderBlock(d_model,
+                 d_ff,
+                 n_heads,
+                 dropout,
+                 dropout_shared_axes,
+                 mode,
+                 ff_activation,
+                 ff_dropout,
+                 ff_chunk_size,
+                 ff_use_sru,
+                 ff_sparsity,
+                 ff_sparsity_type,
+                 attention_chunk_size,
+                 attention_type,
+                 n_attention_layers=1,
+                 n_feedforward_layers=1):
   """Returns a list of layers that implements a Transformer encoder block.
 
   The input to the block is a pair, (activations, mask), where the mask was
@@ -662,45 +675,65 @@ def EncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
       use BlockSparseFF if ff_sparsity_type=`'Block'`
     attention_chunk_size: int, if > 0 run attention chunked at this size
     attention_type: The attention layer to use.
+    n_attention_layers: how many residual causal attention layers should we
+      have before the feed-forward block (default: 1, the standard block)
+    n_feedforward_layers: how many FFNN layers should we have (default 1).
 
   Returns:
     A list of layers that maps (activations, mask) to (activations, mask).
   """
-  attention = ApplyAttentionLayer(
-      attention_type,
-      d_model,
-      n_heads,
-      d_model // n_heads,
-      d_model // n_heads,
-      causal=False,
-      masked=True,
-      attention_dropout=dropout,
-      output_dropout=dropout,
-      attention_chunk_size=attention_chunk_size,
-      mode=mode)
-
-  feed_forward = FeedForwardWithOptions(d_model, d_ff, dropout,
-                                        dropout_shared_axes, ff_activation,
-                                        ff_dropout, ff_chunk_size, ff_use_sru,
-                                        ff_sparsity, mode, ff_sparsity_type)
-
-  dropout_ = tl.Dropout(
-      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
-
-  return [
-      tl.Residual(
-          tl.LayerNorm(),
-          attention,
-          dropout_,
-      ),
-      tl.Residual(feed_forward),
+  # `n_attention_layers` number of residuals of attention layer + dropout.
+  # pylint: disable=g-complex-comprehension
+  residual_attentions = [
+      tl.Residual(tl.LayerNorm(),
+                  ApplyAttentionLayer(attention_type,
+                                      d_model,
+                                      n_heads,
+                                      d_model // n_heads,
+                                      d_model // n_heads,
+                                      causal=False,
+                                      masked=True,
+                                      attention_dropout=dropout,
+                                      output_dropout=dropout,
+                                      attention_chunk_size=attention_chunk_size,
+                                      mode=mode),
+                  tl.Dropout(rate=dropout,
+                             shared_axes=dropout_shared_axes,
+                             mode=mode)
+                  )
+      for _ in range(n_attention_layers)
   ]
 
+  feed_forwards = [
+      tl.Residual(
+          FeedForwardWithOptions(d_model, d_ff, dropout,
+                                 dropout_shared_axes, ff_activation,
+                                 ff_dropout, ff_chunk_size, ff_use_sru,
+                                 ff_sparsity, mode, False, ff_sparsity_type)
+      )
+      for _ in range(n_feedforward_layers)
+  ]
+  # pylint: enable=g-complex-comprehension
 
-def DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
-                 ff_activation, ff_dropout, ff_chunk_size, ff_use_sru,
-                 ff_sparsity, ff_sparsity_type, attention_chunk_size,
-                 attention_type, n_attention_layers=1):
+  return residual_attentions + feed_forwards
+
+
+def DecoderBlock(d_model,
+                 d_ff,
+                 n_heads,
+                 dropout,
+                 dropout_shared_axes,
+                 mode,
+                 ff_activation,
+                 ff_dropout,
+                 ff_chunk_size,
+                 ff_use_sru,
+                 ff_sparsity,
+                 ff_sparsity_type,
+                 attention_chunk_size,
+                 attention_type,
+                 n_attention_layers=1,
+                 n_feedforward_layers=1):
   """Returns a list of layers that implements a Transformer decoder block.
 
   The input is an activation tensor.
@@ -732,6 +765,7 @@ def DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
     attention_type: The attention layer to use.
     n_attention_layers: how many residual causal attention layers should we
       have before the feed-forward block (default: 1, the standard block)
+    n_feedforward_layers: how many FFNN layers should we have (default 1).
 
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
@@ -757,13 +791,18 @@ def DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes, mode,
           tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
       ) for i in range(n_attention_layers)]
 
+  feed_forwards = [
+      tl.Residual(
+          FeedForwardWithOptions(d_model, d_ff, dropout,
+                                 dropout_shared_axes, ff_activation,
+                                 ff_dropout, ff_chunk_size, ff_use_sru,
+                                 ff_sparsity, mode, False, ff_sparsity_type)
+      )
+      for _ in range(n_feedforward_layers)
+  ]
   # pylint: enable=g-complex-comprehension
-  feed_forward = FeedForwardWithOptions(d_model, d_ff, dropout,
-                                        dropout_shared_axes, ff_activation,
-                                        ff_dropout, ff_chunk_size, ff_use_sru,
-                                        ff_sparsity, mode, ff_sparsity_type)
 
-  return residual_attentions + [tl.Residual(feed_forward)]
+  return residual_attentions + feed_forwards
 
 
 def EncoderDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
@@ -835,7 +874,8 @@ def EncoderDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
   feed_forward = FeedForwardWithOptions(d_model, d_ff, dropout,
                                         dropout_shared_axes, ff_activation,
                                         ff_dropout, ff_chunk_size, ff_use_sru,
-                                        ff_sparsity, mode, ff_sparsity_type)
+                                        ff_sparsity, mode, False,
+                                        ff_sparsity_type)
 
   return [                             # vec_d masks vec_e
       tl.Residual(

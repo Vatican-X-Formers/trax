@@ -26,10 +26,10 @@ from trax.models import transformer
 from trax.models.reformer import reformer
 from trax.models.research import bert
 from trax.models.research import configurable_transformer
+from trax.models.research import funnel_transformer
 from trax.models.research import layerdrop_transformer
 from trax.models.research import rezero
 from trax.models.research import transformer2
-from trax.models.research import funnel_transformer
 
 
 # Ginify
@@ -52,7 +52,6 @@ ConfigurableTransformerEncoder = model_configure(
 ConfigurableTransformerLM = model_configure(
     configurable_transformer.ConfigurableTransformerLM)
 MLP = model_configure(mlp.MLP)
-PureMLP = model_configure(mlp.PureMLP)
 NeuralGPU = model_configure(neural_gpu.NeuralGPU)
 Reformer = model_configure(reformer.Reformer)
 ReformerLM = model_configure(reformer.ReformerLM)

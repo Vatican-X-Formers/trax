@@ -46,13 +46,13 @@ from trax.supervised import lr_schedules as lr
 class Agent:
   """Abstract class for RL agents, presenting the required API."""
 
-  def __init__(self,  # pylint: disable=dangerous-default-value
+  def __init__(self,
                task: rl_task.RLTask,
                n_trajectories_per_epoch=None,
                n_interactions_per_epoch=None,
                n_eval_episodes=0,
                eval_steps=None,
-               eval_temperatures=[0.0],
+               eval_temperatures=(0.0,),
                only_eval=False,
                output_dir=None,
                timestep_to_np=None):
@@ -255,7 +255,7 @@ class Agent:
             for steps in self._eval_steps:
               for eval_t in self._eval_temperatures:
                 sw.scalar(
-                    'rl/avg_return_temperature_%d_steps%d' % (steps, eval_t),
+                    'rl/avg_return_temperature%d_steps%d' % (eval_t, steps),
                     self._avg_returns_temperatures[eval_t][steps][-1],
                     step=self._epoch)
           sw.scalar('rl/n_interactions', self.task.n_interactions(),
@@ -580,7 +580,7 @@ def network_policy(
   # Copying weights from loop.model should work, because the raw model's
   # weights should be updated automatically during training, but it doesn't.
   # TODO(pkozakowski): Debug.
-  acc = loop._trainer_per_task[0].accelerated_loss_layer  # pylint: disable=protected-access
+  acc = loop._trainer_per_task[0].accelerated_model_with_loss  # pylint: disable=protected-access
   model.weights = acc._unreplicate(acc.weights[0])  # pylint: disable=protected-access
   # Add batch dimension to trajectory_np and run the model.
   pred = model(trajectory_np.observations[None, ...])
