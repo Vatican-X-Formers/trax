@@ -454,27 +454,7 @@ def _FunnelDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
       tl.Dense(d_model)
   )
 
-  causal_attention = FunnelCausalAttention(
-      shorten_factor, d_model, n_heads=n_heads, dropout=dropout, mode=mode)
-
-  feed_forward = _FeedForwardBlock(
-      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
-
-  dropout_ = tl.Dropout(
-      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
-
-  return [
-      tl.LayerNorm(),                               # h
-      tl.Branch(pooling, None),                     # h', h
-      tl.Residual(
-          tl.Select([0, 1, 1]),                     # h', h, h
-          causal_attention,
-          dropout_,
-      ),
-      tl.Residual(
-          feed_forward
-      ),
-  ]
+  return pooling
 
 
 def FunnelTransformerLM(vocab_size,
