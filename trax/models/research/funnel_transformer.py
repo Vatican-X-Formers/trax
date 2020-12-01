@@ -584,6 +584,7 @@ def UFunnel(vocab_size,
             mode='train',
             ff_activation=tl.Relu,
             pool_layer=tl.AvgPool,
+            use_conv=False,
             pool_size=(2,),
             separate_cls=True):
 
@@ -595,7 +596,10 @@ def UFunnel(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
       tl.PositionalEncoding(max_len=max_len, mode=mode)]
-
+  conv_layer = tl.Serial(
+    tl.CausalConv(d_model, shorten_factor),
+    tl.Relu()
+  ) if use_conv else None
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
@@ -604,6 +608,7 @@ def UFunnel(vocab_size,
                      n_heads, dropout, dropout_shared_axes,
                      mode, ff_activation),
       tl.LayerNorm(),            # vecs
+      conv_layer,
       tl.Dense(vocab_size),      # vecs
       tl.LogSoftmax(),           # vecs
   )
