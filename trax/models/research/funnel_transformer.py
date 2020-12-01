@@ -240,6 +240,7 @@ def FunnelTransformerEncoder(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(  # toks
+      tl.ShiftRight(),  # leave space for cls
       # Encode.
       tl.Branch(
           embedding_encoder,
@@ -312,6 +313,7 @@ def FunnelTransformer(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(  # toks
+      tl.ShiftRight(),
       tl.Branch(
           embedding_encoder, tl.PaddingMask()),  # vecs masks
       encoder_blocks_before_first_pooling,  # vecs masks
