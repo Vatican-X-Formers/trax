@@ -547,11 +547,14 @@ def _UFunnelValley(d_model,
 
     current_len = segment_lengths[0]
 
-    decoder_blocks = [
+    pre_decoder_blocks = [
         _DecoderBlock(d_model, d_ff, n_heads,
                     dropout, dropout_shared_axes, mode, ff_activation)
         for _ in range(current_len)]
-                    
+    post_decoder_blocks = [
+        _DecoderBlock(d_model, d_ff, n_heads,
+                    dropout, dropout_shared_axes, mode, ff_activation)
+        for _ in range(current_len)]               
     if n == 1:
         return [decoder_blocks]
 
@@ -561,7 +564,7 @@ def _UFunnelValley(d_model,
     )
 
     return [
-        decoder_blocks,
+        pre_decoder_blocks,
         tl.Residual(
             tl.ShiftRight(n_positions=shorten_factor-1, mode=mode),
             funnel_block,
@@ -569,7 +572,7 @@ def _UFunnelValley(d_model,
              n_heads, dropout, dropout_shared_axes, mode, ff_activation),
             _UpsamplerLM(shorten_factor)
         ),
-        decoder_blocks
+        post_decoder_blocks
     ]
 
 def UFunnel(vocab_size,
