@@ -556,7 +556,7 @@ def _UFunnelValley(d_model,
                     dropout, dropout_shared_axes, mode, ff_activation)
         for _ in range(current_len)]               
     if n == 1:
-        return [decoder_blocks]
+        return [pre_decoder_blocks]
 
     funnel_block = _FunnelDecoderBlock(
       shorten_factor, d_model, d_ff, n_heads, dropout, dropout_shared_axes,
