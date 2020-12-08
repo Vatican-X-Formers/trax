@@ -63,12 +63,13 @@ class FunnelTransformerTest(parameterized.TestCase):
     self.assertEqual(y_cls.shape, long.shape)
     self.assertEqual(y.shape, long.shape)
 
-    self.assertEqual(y_cls.squeeze().tolist(), 5*[2] + 3*[1])
-    self.assertEqual(y.squeeze().tolist(), 8*[2])
+    self.assertEqual(y_cls.squeeze().tolist(), 5 * [2] + 3 * [1])
+    self.assertEqual(y.squeeze().tolist(), 8 * [2])
 
   def test_funnel_block_forward_shape(self):
     n_even = 4
     d_model = 8
+    n_heads = 2
 
     x = np.ones((1, n_even, d_model), dtype=np.float)
     mask = np.ones((1, n_even), dtype=np.int32)
@@ -76,9 +77,15 @@ class FunnelTransformerTest(parameterized.TestCase):
     masker = tl.PaddingMask()
     mask = masker(mask)
 
+    context_bias_layer, location_bias_layer = ft. \
+      get_rel_att_inputs(d_model, n_heads)
+
     block = tl.Serial(
-        ft._FunnelBlock(d_model, 8, 2, 0.1, None, 'train', tl.Relu,
-                        tl.AvgPool, (2,), (2,), separate_cls=True))
+        ft._FunnelBlock(d_model, 8, n_heads, 0.1, None, 'train', tl.Relu,
+                        tl.AvgPool, (2,), (2,), separate_cls=True,
+                        context_bias_layer=context_bias_layer,
+                        location_bias_layer=location_bias_layer,
+                        total_pooling=1))
 
     xs = [x, mask]
     _, _ = block.init(shapes.signature(xs))
@@ -91,7 +98,7 @@ class FunnelTransformerTest(parameterized.TestCase):
     n_classes = 5
     model = ft.FunnelTransformerEncoder(2, n_classes=n_classes, d_model=8,
                                         d_ff=8, encoder_segment_lengths=(1, 1),
-                                        n_heads=2, max_len=8)
+                                        n_heads=2)
 
     batch_size = 2
     n_tokens = 4
@@ -106,7 +113,7 @@ class FunnelTransformerTest(parameterized.TestCase):
     vocab_size = 7
     model = ft.FunnelTransformer(7, d_model=d_model, d_ff=8,
                                  encoder_segment_lengths=(1, 1),
-                                 n_decoder_blocks=1, n_heads=2, max_len=8)
+                                 n_decoder_blocks=1, n_heads=2)
 
     batch_size = 2
     n_tokens = 4

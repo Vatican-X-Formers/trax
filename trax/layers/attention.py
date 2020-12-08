@@ -76,7 +76,7 @@ def Attention(d_feature, n_heads=1, dropout=0.0, mode='train'):
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     n_heads: Number of attention heads.
-    dropout: Probababilistic rate for internal dropout applied to attention
+    dropout: Probabilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
@@ -95,7 +95,7 @@ def AttentionQKV(d_feature, n_heads=1, dropout=0.0, mode='train'):
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     n_heads: Number of attention heads.
-    dropout: Probababilistic rate for internal dropout applied to attention
+    dropout: Probabilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
@@ -134,7 +134,7 @@ class PureAttention(base.Layer):
 
     Args:
       n_heads: Number of attention heads.
-      dropout: Probababilistic rate for dropout applied to attention strengths
+      dropout: Probabilistic rate for dropout applied to attention strengths
           (based on query-key pairs) before applying them to values.
       mode: One of `'train'`, `'eval'`, or `'predict'`.
     """
@@ -187,7 +187,7 @@ def DotProductAttention(queries, keys, values, mask, dropout, mode, rng):
     keys: Per-head activations representing attention keys.
     values: Per-head activations to be combined by computed attention weights.
     mask: Mask that distinguishes positions with real content vs. padding.
-    dropout: Probababilistic rate for dropout applied to attention strengths
+    dropout: Probabilistic rate for dropout applied to attention strengths
         (based on query-key pairs) before applying them to values.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
     rng: Single-use random number generator (JAX PRNG key).
@@ -283,7 +283,7 @@ def CausalAttention(d_feature, n_heads=1, dropout=0.0,
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     n_heads: Number of attention heads.
-    dropout: Probababilistic rate for internal dropout applied to attention
+    dropout: Probabilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
     max_inference_length: maximum length for inference.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
@@ -319,7 +319,7 @@ class DotProductCausalAttention(base.Layer):
     """Creates a DotProductCausalAttention instance.
 
     Args:
-      dropout: Probababilistic rate for dropout applied to attention strengths
+      dropout: Probabilistic rate for dropout applied to attention strengths
           (based on query-key pairs) before applying them to values.
       max_inference_length: maximum length of sequences during inference.
       mode: One of `'train'`, `'eval'`, or `'predict'`.

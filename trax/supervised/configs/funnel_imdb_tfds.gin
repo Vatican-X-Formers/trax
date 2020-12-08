@@ -90,7 +90,6 @@ train.steps = 10000
 FunnelTransformerEncoder.d_model = 512
 FunnelTransformerEncoder.d_ff = 2048
 FunnelTransformerEncoder.dropout = 0.1
-FunnelTransformerEncoder.max_len = 512
 FunnelTransformerEncoder.mode = 'train'
 FunnelTransformerEncoder.n_classes = 2
 FunnelTransformerEncoder.n_heads = 8
