@@ -102,7 +102,7 @@ class RelativeAttention(base.Layer):
     Args:
       separate_cls: True/False if we separate_cls in calculations.
       n_heads: Number of attention heads.
-      dropout: Probababilistic rate for dropout applied to attention strengths
+      dropout: Probabilistic rate for dropout applied to attention strengths
           (based on query-key pairs) before applying them to values.
       mode: One of `'train'`, `'eval'`, or `'predict'`.
     """
@@ -165,7 +165,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
       location_bias: Global location bias from Transformer XL's attention.
       mask: Mask that distinguishes positions with real content vs. padding.
       separate_cls: True/False if we separate_cls in calculations.
-      dropout: Probababilistic rate for dropout applied to attention strengths
+      dropout: Probabilistic rate for dropout applied to attention strengths
           (based on query-key pairs) before applying them to values.
       mode: One of `'train'`, `'eval'`, or `'predict'`.
       rng: Single-use random number generator (JAX PRNG key).
@@ -246,7 +246,7 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
 
 def _fast_matrix_shift(x, shift):
   # This function shifts i-th row by i * shift elements to the left.
-  # It implemenets necessary shift for relative positional attention calculation
+  # It implements necessary shift for relative positional attention calculation.
 
   bsz, n_head = x.shape[0], x.shape[1]
   qlen, klen = x.shape[2], (x.shape[3] + 1) // 2
