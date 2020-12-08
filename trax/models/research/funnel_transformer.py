@@ -24,10 +24,12 @@ from trax import layers as tl
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
 from trax.layers.assert_shape import assert_shape
-from trax.layers.research.rel_attention import RelativeAttentionLayer, ShiftRightCls
+from trax.layers.research.rel_attention import RelativeAttentionLayer, \
+  ShiftRightCls
 from trax.models.transformer import _FeedForwardBlock
 from trax.layers import initializers as init
 from trax.layers import core
+
 
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
@@ -89,6 +91,7 @@ def _Upsampler(total_pool_size, separate_cls):
     separate_cls: If `True`, pooling in funnel blocks is not applied to
           embeddings of the first token (`cls` from BERT paper).
   """
+
   def _Upsample(short, long):
     if separate_cls:
       upsampled_short = jnp.concatenate(
@@ -140,8 +143,11 @@ def _FunnelBlock(d_model, d_ff, n_heads,
         neighboring windows along each axis. If specified, must be a tuple of
         the same length as `pool_size`. If None, then offsets of 1 along each
         window axis, :math:`(1, ..., 1)`, will be used.
-    separate_cls: If `True`, pooling in funnel blocks is not applied to
-          embeddings of the first token (`cls` from BERT paper).
+    separate_cls: True/False if we separate_cls in calculations.
+    context_bias_layer: Global context bias from Transformer XL's attention.
+    location_bias_layer: Global location bias from Transformer XL's attention.
+    total_pooling: The combined pool size of previously used funnel blocks.
+
   Returns:
       A list of layers that maps (activations, mask) to (activations', mask).
   """
@@ -159,15 +165,15 @@ def _FunnelBlock(d_model, d_ff, n_heads,
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
 
-  return [                                          # h, mask
-      tl.LayerNorm(),                               # h, mask
-      tl.Branch(pooling, None),                     # h', h, mask
+  return [  # h, mask
+      tl.LayerNorm(),  # h, mask
+      tl.Branch(pooling, None),  # h', h, mask
       tl.Residual(
-          tl.Select([0, 1, 1, 2]),                  # h', h, h, mask
-          attention,                                # attn, mask
-          tl.Parallel(None, mask_pooling),          # attn, mask'
-          hidden_dropout                            # attn, mask'
-      ),                                            # funnel_activations, mask'
+          tl.Select([0, 1, 1, 2]),  # h', h, h, mask
+          attention,  # attn, mask
+          tl.Parallel(None, mask_pooling),  # attn, mask'
+          hidden_dropout  # attn, mask'
+      ),  # funnel_activations, mask'
       tl.Residual(
           feed_forward
       )
@@ -198,6 +204,10 @@ def _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
         pass all values through unaltered.
     ff_activation: Type of activation function at the end of each block; must
         be an activation-type subclass of `Layer`.
+    separate_cls: True/False if we separate_cls in calculations.
+    context_bias_layer: Global context bias from Transformer XL's attention.
+    location_bias_layer: Global location bias from Transformer XL's attention.
+    total_pooling: The combined pool size of previously used funnel blocks.
 
   Returns:
     A list of layers that maps (activations, att_vecs, mask) to
@@ -214,15 +224,15 @@ def _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Residual( # vecs, masks
+      tl.Residual(  # vecs, masks
           tl.LayerNorm(),
           tl.Select([0, 0, 0]),
           attention,
           dropout_,
-      ), # vecs, masks
+      ),  # vecs, masks
       tl.Residual(
           feed_forward
-      ), # vecs, masks
+      ),  # vecs, masks
   ]
 
 
@@ -240,9 +250,7 @@ def FunnelTransformerEncoder(vocab_size,
                              pool_layer=tl.AvgPool,
                              pool_size=(2,),
                              strides=(2,),
-                             separate_cls=True,
-                             bias_initializer=init.RandomNormalInitializer(
-                                 1e-6)):
+                             separate_cls=True):
   """Returns a Funnel Encoder.
 
   This model performs text categorization:
@@ -303,7 +311,9 @@ def FunnelTransformerEncoder(vocab_size,
   """
 
   assert encoder_segment_lengths
-  vocab_size += 1 # vocab_size - 1 would be cls's token id
+
+  # vocab_size - 1 would be cls's token id
+  vocab_size += 1
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
@@ -316,10 +326,11 @@ def FunnelTransformerEncoder(vocab_size,
   assert d_model % n_heads == 0 and d_model % 2 == 0
   d_head = d_model // n_heads
 
-  context_bias_layer = \
-    core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head))
-  location_bias_layer = \
-    core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head))
+  bias_initializer = init.RandomNormalInitializer(1e-6)
+  context_bias_layer = core.Weights(bias_initializer,
+                                    shape=(1, n_heads, 1, d_head))
+  location_bias_layer = core.Weights(bias_initializer,
+                                     shape=(1, n_heads, 1, d_head))
   total_pooling = 1
 
   for i in range(n_encoder_segments):
@@ -366,6 +377,7 @@ def FunnelTransformerEncoder(vocab_size,
       tl.Dense(n_classes),  # cls
       tl.LogSoftmax(),  # cls
   )
+
 
 def FunnelTransformer(vocab_size,
                       d_model=512,
@@ -475,15 +487,15 @@ def FunnelTransformer(vocab_size,
   return tl.Serial(  # toks
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks_before_first_pooling,        # vecs masks
+      encoder_blocks_before_first_pooling,  # vecs masks
       tl.Select([0, 1, 0, 1]),
       # vecs masks residual = vecs old_masks
-      encoder_blocks_from_first_pooling,          # vecs masks residual masks
-      tl.Select([0, 2, 3]),                       # vecs residual masks
+      encoder_blocks_from_first_pooling,  # vecs masks residual masks
+      tl.Select([0, 2, 3]),  # vecs residual masks
       tl.Parallel(
           # residual from first segment is taken before
           # normalization, so apply it now
-          None, tl.LayerNorm(), None),            # vecs norm(residual) masks
+          None, tl.LayerNorm(), None),  # vecs norm(residual) masks
       _Upsampler(total_pool_size, separate_cls),  # vecs masks
       decoder_blocks,
       tl.Select([0], n_in=2),  # vecs
