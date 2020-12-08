@@ -278,7 +278,6 @@ def FunnelTransformerEncoder(vocab_size,
         therefore the total number of blocks in the model is equal to
         `sum(encoder_segment_lengths) + len(encoder_segment_lengths) - 1`.
     n_heads: Number of attention heads.
-    max_len: Maximum symbol length for positional encoding.
     dropout: Stochastic rate (probability) for dropping an activation value
         when applying dropout within an encoder block.
     dropout_shared_axes: Tensor axes on which to share a dropout mask.
@@ -420,7 +419,6 @@ def FunnelTransformer(vocab_size,
         `sum(encoder_segment_lengths) + len(encoder_segment_lengths) - 1`.
     n_decoder_blocks: Number of transformer blocks in the upsampling decoder.
     n_heads: Number of attention heads.
-    max_len: Maximum symbol length for positional encoding.
     dropout: Stochastic rate (probability) for dropping an activation value
         when applying dropout within an encoder block.
     dropout_shared_axes: Tensor axes on which to share a dropout mask.
