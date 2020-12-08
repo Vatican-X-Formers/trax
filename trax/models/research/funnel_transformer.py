@@ -502,21 +502,21 @@ def FunnelTransformer(vocab_size,
   total_pool_size = pool_size[0] ** (len(encoder_segment_lengths) - 1)
 
   # Assemble and return the model.
-  return tl.Serial(  # toks
+  return tl.Serial(                               # toks
       tl.Branch(
-          token_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks_before_first_pooling,  # vecs masks
+          token_encoder, tl.PaddingMask()),       # vecs masks
+      encoder_blocks_before_first_pooling,        # vecs masks
       tl.Select([0, 1, 0, 1]),
       # vecs masks residual = vecs old_masks
-      encoder_blocks_from_first_pooling,  # vecs masks residual masks
-      tl.Select([0, 2, 3]),  # vecs residual masks
+      encoder_blocks_from_first_pooling,          # vecs masks residual masks
+      tl.Select([0, 2, 3]),                       # vecs residual masks
       tl.Parallel(
           # residual from first segment is taken before
           # normalization, so apply it now
-          None, tl.LayerNorm(), None),  # vecs norm(residual) masks
+          None, tl.LayerNorm(), None),            # vecs norm(residual) masks
       _Upsampler(total_pool_size, separate_cls),  # vecs masks
       decoder_blocks,
-      tl.Select([0], n_in=2),  # vecs
+      tl.Select([0], n_in=2),                     # vecs
       tl.LayerNorm(),
       tl.Dense(vocab_size),
       tl.LogSoftmax()
