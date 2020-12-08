@@ -224,15 +224,15 @@ def _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Residual(  # vecs, masks
+      tl.Residual(                # vecs, masks
           tl.LayerNorm(),
           tl.Select([0, 0, 0]),
           attention,
           dropout_,
-      ),  # vecs, masks
+      ),                          # vecs, masks
       tl.Residual(
           feed_forward
-      ),  # vecs, masks
+      ),                          # vecs, masks
   ]
 
 
@@ -362,20 +362,20 @@ def FunnelTransformerEncoder(vocab_size,
   cls_pooling = SelectFirst() if separate_cls else tl.Mean(axis=1)
 
   # Assemble and return the model.
-  return tl.Serial(  # toks
+  return tl.Serial(                       # toks
       # Encode.
       ShiftRightCls(vocab_size),
       tl.Branch(
           token_encoder,
-          tl.PaddingMask()),  # vecs, masks
-      encoder_blocks,  # vecs, masks
-      tl.Select([0], n_in=2),  # vecs
-      tl.LayerNorm(),  # vecs
+          tl.PaddingMask()),              # vecs, masks
+      encoder_blocks,                     # vecs, masks
+      tl.Select([0], n_in=2),             # vecs
+      tl.LayerNorm(),                     # vecs
 
       # Map to output categories.
-      cls_pooling,  # cls
-      tl.Dense(n_classes),  # cls
-      tl.LogSoftmax(),  # cls
+      cls_pooling,                        # cls
+      tl.Dense(n_classes),                # cls
+      tl.LogSoftmax(),                    # cls
   )
 
 
