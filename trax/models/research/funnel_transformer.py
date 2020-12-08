@@ -320,16 +320,8 @@ def FunnelTransformerEncoder(vocab_size,
   encoder_blocks = []
   n_encoder_segments = len(encoder_segment_lengths)
 
-  # Global relative attentions bias initialization shared across the layers
-  assert d_model % n_heads == 0 and d_model % 2 == 0
-  d_head = d_model // n_heads
-
-  bias_initializer = init.RandomNormalInitializer(1e-6)
-  context_bias_layer = core.Weights(bias_initializer,
-                                    shape=(1, n_heads, 1, d_head))
-  location_bias_layer = core.Weights(bias_initializer,
-                                     shape=(1, n_heads, 1, d_head))
   total_pooling = 1
+  context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model, n_heads)
 
   for i in range(n_encoder_segments):
     # Building i'th segment
@@ -375,6 +367,19 @@ def FunnelTransformerEncoder(vocab_size,
       tl.Dense(n_classes),                # cls
       tl.LogSoftmax(),                    # cls
   )
+
+
+def get_rel_att_inputs(d_model, n_heads):
+  # Global relative attentions bias initialization shared across the layers
+  assert d_model % n_heads == 0 and d_model % 2 == 0
+  d_head = d_model // n_heads
+
+  bias_initializer = init.RandomNormalInitializer(1e-6)
+  context_bias_layer = core.Weights(bias_initializer,
+                                    shape=(1, n_heads, 1, d_head))
+  location_bias_layer = core.Weights(bias_initializer,
+                                     shape=(1, n_heads, 1, d_head))
+  return context_bias_layer, location_bias_layer
 
 
 def FunnelTransformer(vocab_size,
@@ -443,15 +448,20 @@ def FunnelTransformer(vocab_size,
   """
   assert encoder_segment_lengths
 
-  positional_encoder = [
+  token_encoder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
   n_encoder_segments = len(encoder_segment_lengths)
 
+  total_pooling = 1
+  context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model, n_heads)
+
   encoder_blocks_before_first_pooling = [
       _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout,
-                            dropout_shared_axes, mode, ff_activation)
+                            dropout_shared_axes, mode, ff_activation,
+                            separate_cls, context_bias_layer,
+                            location_bias_layer, total_pooling)
       for _ in range(encoder_segment_lengths[0])]
   encoder_blocks_from_first_pooling = []
 
@@ -464,17 +474,29 @@ def FunnelTransformer(vocab_size,
                      dropout_shared_axes, mode,
                      ff_activation, pool_layer,
                      pool_size=pool_size, strides=pool_size,
-                     separate_cls=separate_cls))
+                     separate_cls=separate_cls,
+                     context_bias_layer=context_bias_layer,
+                     location_bias_layer=location_bias_layer,
+                     total_pooling=total_pooling))
+
+    total_pooling = total_pooling * pool_size[0]
 
     for _ in range(encoder_segment_lengths[i]):
       # Create segment_size encoder blocks
       encoder_blocks_from_first_pooling.append(
           _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout,
-                                dropout_shared_axes, mode, ff_activation))
+                                dropout_shared_axes, mode, ff_activation,
+                                separate_cls,
+                                context_bias_layer,
+                                location_bias_layer,
+                                total_pooling))
 
   decoder_blocks = [_RelativeEncoderBlock(d_model, d_ff, n_heads, dropout,
                                           dropout_shared_axes, mode,
-                                          ff_activation)
+                                          ff_activation, separate_cls,
+                                          context_bias_layer,
+                                          location_bias_layer,
+                                          total_pooling)
                     for _ in range(n_decoder_blocks)]
 
   total_pool_size = pool_size[0] ** (len(encoder_segment_lengths) - 1)
@@ -482,7 +504,7 @@ def FunnelTransformer(vocab_size,
   # Assemble and return the model.
   return tl.Serial(  # toks
       tl.Branch(
-          positional_encoder, tl.PaddingMask()),  # vecs masks
+          token_encoder, tl.PaddingMask()),  # vecs masks
       encoder_blocks_before_first_pooling,  # vecs masks
       tl.Select([0, 1, 0, 1]),
       # vecs masks residual = vecs old_masks
