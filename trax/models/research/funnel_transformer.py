@@ -345,7 +345,8 @@ def FunnelTransformerEncoder(vocab_size,
                        context_bias_layer,
                        location_bias_layer,
                        total_pooling))
-      total_pooling = total_pooling * pool_size
+
+      total_pooling = total_pooling * pool_size[0]
 
   cls_pooling = SelectFirst() if separate_cls else tl.Mean(axis=1)
 
