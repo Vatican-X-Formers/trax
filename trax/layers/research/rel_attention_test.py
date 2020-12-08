@@ -22,12 +22,13 @@ import numpy as np
 from trax import shapes
 
 import trax.layers as tl
-import trax.layers.research.relattention as rattention
+import trax.layers.research.rel_attention as ra
+
 
 class RelAttentionTest(absltest.TestCase):
 
   def test_shift_right_cls(self):
-    layer = rattention.ShiftRightCls(5)
+    layer = ra.ShiftRightCls(5)
     x = np.array([[1, 2, 3, 4]])
     _, _ = layer.init(shapes.signature(x))
     y = layer(x)
@@ -35,7 +36,7 @@ class RelAttentionTest(absltest.TestCase):
     self.assertEqual(tl.to_list(y), [[5, 1, 2, 3]])
 
   def test_fast_shift_matrix_stride_1(self):
-    layer = rattention._fast_matrix_shift
+    layer = ra._fast_matrix_shift
     x = np.array([[[[-3., -2., -1.,  0.,  1.,  2.,  3.],
                     [-3., -2., -1.,  0.,  1.,  2.,  3.],
                     [-3., -2., -1.,  0.,  1.,  2.,  3.],
@@ -49,7 +50,7 @@ class RelAttentionTest(absltest.TestCase):
                                       [-3.,  -2., -1.,  0.]]]])
 
   def test_fast_shift_matrix_stride_2(self):
-    layer = rattention._fast_matrix_shift
+    layer = ra._fast_matrix_shift
     x = np.array([[[[-3., -2., -1., 0., 1., 2., 3.],
                     [-3., -2., -1., 0., 1., 2., 3.]]]]).astype(np.float32)
 

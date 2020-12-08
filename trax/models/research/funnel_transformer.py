@@ -24,7 +24,7 @@ from trax import layers as tl
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
 from trax.layers.assert_shape import assert_shape
-from trax.layers.research.relattention import RelativeAttentionLayer, ShiftRightCls
+from trax.layers.research.rel_attention import RelativeAttentionLayer, ShiftRightCls
 from trax.models.transformer import _FeedForwardBlock
 from trax.layers import initializers as init
 from trax.layers import core

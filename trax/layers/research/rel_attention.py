@@ -243,6 +243,7 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
   return cb.Fn('Positional embeddings', CalculatePositionalEmbeddings,
                n_out=1)
 
+
 def _fast_matrix_shift(x, shift):
   # This function shifts i-th row by i * shift elements to the left.
   # It implemenets necessary shift for relative positional attention calculation
