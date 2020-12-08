@@ -31,6 +31,10 @@ from trax.layers import initializers as init
 from trax.layers import core
 
 
+# Layers are always CamelCase, but functions in general are snake_case
+# pylint: disable=invalid-name
+
+
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
               pool_size=(2,),

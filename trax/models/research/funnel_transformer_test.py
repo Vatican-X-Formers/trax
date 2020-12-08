@@ -77,8 +77,8 @@ class FunnelTransformerTest(parameterized.TestCase):
     masker = tl.PaddingMask()
     mask = masker(mask)
 
-    context_bias_layer, location_bias_layer = \
-      ft.get_rel_att_inputs(d_model, n_heads)
+    context_bias_layer, location_bias_layer = ft. \
+      get_rel_att_inputs(d_model, n_heads)
 
     block = tl.Serial(
         ft._FunnelBlock(d_model, 8, n_heads, 0.1, None, 'train', tl.Relu,
@@ -98,7 +98,7 @@ class FunnelTransformerTest(parameterized.TestCase):
     n_classes = 5
     model = ft.FunnelTransformerEncoder(2, n_classes=n_classes, d_model=8,
                                         d_ff=8, encoder_segment_lengths=(1, 1),
-                                        n_heads=2, max_len=8)
+                                        n_heads=2)
 
     batch_size = 2
     n_tokens = 4
@@ -113,7 +113,7 @@ class FunnelTransformerTest(parameterized.TestCase):
     vocab_size = 7
     model = ft.FunnelTransformer(7, d_model=d_model, d_ff=8,
                                  encoder_segment_lengths=(1, 1),
-                                 n_decoder_blocks=1, n_heads=2, max_len=8)
+                                 n_decoder_blocks=1, n_heads=2)
 
     batch_size = 2
     n_tokens = 4
