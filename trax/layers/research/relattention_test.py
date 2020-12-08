@@ -22,24 +22,20 @@ import numpy as np
 from trax import shapes
 
 import trax.layers as tl
-import trax.layers.relattention as relattention
+import trax.layers.research.relattention as rattention
 
 class RelAttentionTest(absltest.TestCase):
 
-  def test_simple_call(self):
-    layer = tl.CausalAttention(d_feature=4, n_heads=2)
-    x = [np.array([[[2, 5, 3, 4],
-                    [0, 1, 2, 3],
-                    [0, 1, 2, 3],]]),
-         np.array([[[[1, 0, 1]]]])]
+  def test_shift_right_cls(self):
+    layer = rattention.ShiftRightCls(5)
+    x = np.array([[1, 2, 3, 4]])
     _, _ = layer.init(shapes.signature(x))
+    y = layer(x)
 
-    y, mask = layer(x)
-    self.assertEqual(y.shape, (1, 3, 4))
-    self.assertEqual(mask.shape, (1, 1, 1, 3))
+    self.assertEqual(tl.to_list(y), [[5, 1, 2, 3]])
 
   def test_fast_shift_matrix_stride_1(self):
-    layer = relattention._fast_matrix_shift
+    layer = rattention._fast_matrix_shift
     x = np.array([[[[-3., -2., -1.,  0.,  1.,  2.,  3.],
                     [-3., -2., -1.,  0.,  1.,  2.,  3.],
                     [-3., -2., -1.,  0.,  1.,  2.,  3.],
@@ -53,7 +49,7 @@ class RelAttentionTest(absltest.TestCase):
                                       [-3.,  -2., -1.,  0.]]]])
 
   def test_fast_shift_matrix_stride_2(self):
-    layer = relattention._fast_matrix_shift
+    layer = rattention._fast_matrix_shift
     x = np.array([[[[-3., -2., -1., 0., 1., 2., 3.],
                     [-3., -2., -1., 0., 1., 2., 3.]]]]).astype(np.float32)
 
