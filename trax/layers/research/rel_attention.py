@@ -56,7 +56,7 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
     separate_cls: True/False if we separate_cls in calculations.
     total_pooling: The combined pool size of previously used funnel blocks.
     n_heads: Number of attention heads.
-    dropout: Probababilistic rate for internal dropout applied to attention
+    dropout: Probabilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
