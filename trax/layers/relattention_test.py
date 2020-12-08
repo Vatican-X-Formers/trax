@@ -41,19 +41,23 @@ class RelAttentionTest(absltest.TestCase):
   def test_fast_shift_matrix_stride_1(self):
     layer = relattention._fast_matrix_shift
     x = np.array([[[[-3., -2., -1.,  0.,  1.,  2.,  3.],
+                    [-3., -2., -1.,  0.,  1.,  2.,  3.],
+                    [-3., -2., -1.,  0.,  1.,  2.,  3.],
                     [-3., -2., -1.,  0.,  1.,  2.,  3.]]]]).astype(np.float32)
 
-    y = layer(x, stride=1)
+    y = layer(x, shift=1)
     self.assertEqual(y.dtype, np.float32)
     self.assertEqual(tl.to_list(y), [[[[0.,  1.,  2.,  3.],
-                                      [-1.,  0.,  1.,  2.]]]])
+                                      [-1.,  0.,  1.,  2.],
+                                      [-2.,  -1.,  0.,  1.],
+                                      [-3.,  -2., -1.,  0.]]]])
 
   def test_fast_shift_matrix_stride_2(self):
     layer = relattention._fast_matrix_shift
     x = np.array([[[[-3., -2., -1., 0., 1., 2., 3.],
                     [-3., -2., -1., 0., 1., 2., 3.]]]]).astype(np.float32)
 
-    y = layer(x, stride=2)
+    y = layer(x, shift=2)
     self.assertEqual(y.dtype, np.float32)
     self.assertEqual(tl.to_list(y), [[[[0., 1., 2., 3.],
                                        [-2., -1., 0., 1.]]]])

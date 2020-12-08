@@ -111,7 +111,8 @@ def _Upsampler(total_pool_size, separate_cls):
 
 def _FunnelBlock(d_model, d_ff, n_heads,
                  dropout, dropout_shared_axes, mode, ff_activation,
-                 pool_layer, pool_size, strides, separate_cls):
+                 pool_layer, pool_size, strides, separate_cls,
+                 context_bias_layer, location_bias_layer, total_pooling):
   """Internal funnel block. Returns a list of layers implementing it.
 
   The input is an activation tensor.
@@ -150,7 +151,8 @@ def _FunnelBlock(d_model, d_ff, n_heads,
   mask_pooling = MaskPool(pool_size, strides, separate_cls)
 
   attention = RelativeAttentionLayer(
-      d_feature=d_model, n_heads=n_heads, dropout=dropout, mode=mode)
+      d_model, context_bias_layer, location_bias_layer, separate_cls,
+      total_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
 
   hidden_dropout = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
@@ -158,23 +160,24 @@ def _FunnelBlock(d_model, d_ff, n_heads,
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
 
-  return [                                          # h, pos_emb, bias, mask
-      tl.LayerNorm(),                               # h, pos_emb, bias, mask
-      tl.Branch(pooling, None),                     # h', h, pos_emb, bias, mask
+  return [                                          # h, mask
+      tl.LayerNorm(),                               # h, mask
+      tl.Branch(pooling, None),                     # h', h, mask
       tl.Residual(
-          tl.Select([0, 1, 1, 2, 3, 4]),                  # h', h, h, pos_emb, bias, mask
-          attention,                                # attn, pos_emb, bias, mask
-          tl.Parallel(None, None, None, mask_pooling),    # attn, pos_emb, bias, mask'
-          hidden_dropout                            # attn, pos_emb, bias, mask'
-      ),                                            # funnel_activations, pos_emb, bias, mask'
+          tl.Select([0, 1, 1, 2]),                  # h', h, h, mask
+          attention,                                # attn, mask
+          tl.Parallel(None, mask_pooling),          # attn, mask'
+          hidden_dropout                            # attn, mask'
+      ),                                            # funnel_activations, mask'
       tl.Residual(
           feed_forward
       )
   ]
 
 
-def _RelativeEncoderBlock(d_model, d_ff, n_heads,
-                          dropout, dropout_shared_axes, mode, ff_activation):
+def _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+                          mode, ff_activation, separate_cls, context_bias_layer,
+                          location_bias_layer, total_pooling):
   """Returns a list of layers that implements a Transformer encoder block.
 
   The input to the block is a pair, (activations, mask), where the mask was
@@ -202,7 +205,8 @@ def _RelativeEncoderBlock(d_model, d_ff, n_heads,
                                (activations, att_vecs, mask).
   """
   attention = RelativeAttentionLayer(
-      d_model, n_heads=n_heads, dropout=dropout, mode=mode)
+      d_model, context_bias_layer, location_bias_layer, separate_cls,
+      total_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
 
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
@@ -211,15 +215,15 @@ def _RelativeEncoderBlock(d_model, d_ff, n_heads,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Residual( # vecs, pos_emb, biases, masks
+      tl.Residual( # vecs, masks
           tl.LayerNorm(),
           tl.Select([0, 0, 0]),
           attention,
           dropout_,
-      ), # vecs, pos_emb, biases, masks
+      ), # vecs, masks
       tl.Residual(
           feed_forward
-      ), # vecs, pos_emb, biases, masks
+      ), # vecs, masks
   ]
 
 
@@ -301,12 +305,22 @@ def FunnelTransformerEncoder(vocab_size,
 
   assert encoder_segment_lengths
 
-  positional_encoder = [
+  token_encoder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
   encoder_blocks = []
   n_encoder_segments = len(encoder_segment_lengths)
+
+  # Global relative attentions bias initialization shared across the layers
+  assert d_model % n_heads == 0 and d_model % 2 == 0
+  d_head = d_model // n_heads
+
+  context_bias_layer = \
+    core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head))
+  location_bias_layer = \
+    core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head))
+  total_pooling = 1
 
   for i in range(n_encoder_segments):
     # Building i'th segment
@@ -315,7 +329,11 @@ def FunnelTransformerEncoder(vocab_size,
       encoder_blocks.append(
           _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes,
-                                mode, ff_activation))
+                                mode, ff_activation,
+                                separate_cls,
+                                context_bias_layer,
+                                location_bias_layer,
+                                total_pooling))
 
     # If not last segment, add funnel block
     if i != n_encoder_segments - 1:
@@ -323,45 +341,22 @@ def FunnelTransformerEncoder(vocab_size,
           _FunnelBlock(d_model, d_ff, n_heads, dropout,
                        dropout_shared_axes, mode,
                        ff_activation, pool_layer, pool_size,
-                       strides, separate_cls))
+                       strides, separate_cls,
+                       context_bias_layer,
+                       location_bias_layer,
+                       total_pooling))
+      total_pooling = total_pooling * pool_size
 
   cls_pooling = SelectFirst() if separate_cls else tl.Mean(axis=1)
-
-  # Global relative attentions bias initialization, layer sharing
-  assert d_model % n_heads == 0 and d_model % 2 == 0
-  d_head = d_model // n_heads
-
-  def PrepareAttentionInputs():
-    """Layer that prepares additional global biases for relative attention."""
-
-    def F(input_tokens):
-      seq_len = input_tokens.shape[-1]
-      inv_freq = 1 / (10000 ** (np.arange(0.0, d_model, 2.0) / d_model))
-      positions = np.arange(-seq_len + 1, seq_len, 1.0)
-      sinusoid_freq = np.einsum('i,j->ij', positions, inv_freq)
-      pos_emb = np.concatenate([np.sin(sinusoid_freq),
-                                np.cos(sinusoid_freq)], axis=1)
-      return pos_emb
-
-    def G(a, b, c):
-      return c, (a, b)
-
-    return tl.Serial(
-        tl.Fn('Absolute positional embeddings', F, n_out=1),
-        core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head)),
-        core.Weights(bias_initializer, shape=(1, n_heads, 1, d_head)),
-        tl.Fn('To tuple', G, n_out=2)  # pos_emb, (v_bias, u_bias)
-    )
 
   # Assemble and return the model.
   return tl.Serial(  # toks
       # Encode.
       tl.Branch(
-          positional_encoder,
-          PrepareAttentionInputs(),
-          tl.PaddingMask()),  # vecs, pos_emb, biases, masks
-      encoder_blocks,  # vecs, pos_emb, biases, masks
-      tl.Select([0], n_in=4),  # vecs
+          token_encoder,
+          tl.PaddingMask()),  # vecs, masks
+      encoder_blocks,  # vecs, masks
+      tl.Select([0], n_in=2),  # vecs
       tl.LayerNorm(),  # vecs
 
       # Map to output categories.
