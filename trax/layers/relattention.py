@@ -281,3 +281,18 @@ def _fast_matrix_shift(x, shift):
   x = x.reshape(bsz, n_head, qlen, klen * 2 - 1)
   x = x[:, :, :, shift - 1: shift - 1 + klen]
   return x
+
+
+@assert_shape('...d->...d')
+def ShiftRightCls(cls_id):
+  """Returns a layer that can insert padding to shift the input sequence.
+  Args:
+    cls_id: id of cls token in embedding
+  """
+  def f(x):
+    pad_widths = [(0, 0)] * len(x.shape)
+    pad_widths[1] = (1, 0)  # Padding on axis.
+    padded = jnp.pad(x, pad_widths, mode='constant',
+                     constant_values=x.dtype.type(cls_id))
+    return padded[:, :-1]
+  return cb.Fn('ShiftRightCls()', f)

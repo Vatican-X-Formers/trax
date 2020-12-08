@@ -25,7 +25,7 @@ from trax import layers as tl
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
 from trax.layers.assert_shape import assert_shape
-from trax.layers.relattention import RelativeAttentionLayer
+from trax.layers.relattention import RelativeAttentionLayer, ShiftRightCls
 from trax.models.transformer import _FeedForwardBlock
 from trax.layers import initializers as init
 from trax.layers import core
@@ -304,6 +304,7 @@ def FunnelTransformerEncoder(vocab_size,
   """
 
   assert encoder_segment_lengths
+  vocab_size += 1 # vocab_size - 1 would be cls's token id
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
@@ -353,6 +354,7 @@ def FunnelTransformerEncoder(vocab_size,
   # Assemble and return the model.
   return tl.Serial(  # toks
       # Encode.
+      ShiftRightCls(vocab_size),
       tl.Branch(
           token_encoder,
           tl.PaddingMask()),  # vecs, masks
