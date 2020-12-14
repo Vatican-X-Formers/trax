@@ -26,7 +26,15 @@ from trax.models.research.funnel_attention import \
     FunnelCausalAttention
 from trax.models.transformer import _EncoderBlock, _FeedForwardBlock, \
     _DecoderBlock
+from jax import numpy as jnp
 
+
+def print_and_return(args, label):
+    print(label, args.shape)
+    return args
+
+def IdPrint(label = None):
+  return tl.Fn('IdPrint', lambda x: print_and_return(x, label))
 
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
@@ -606,18 +614,20 @@ def UFunnel(vocab_size,
     ) if use_conv else None
 
     _channels = 3
-    merge_layer = tl.Conv(kernel_size=(_channels,), strides=3, padding='VALID', filters=1)
+    merge_layer = tl.Conv1d(kernel_size=_channels, stride=3, padding='VALID', filters=d_model)
 
     # Assemble and return the model.
     return tl.Serial(  # tokens (or chunked tuple of tokens)
-        merge_layer,  # toks
         tl.ShiftRight(mode=mode),  # toks
         positional_encoder,  # vecs
+        merge_layer,  # toks
         _UFunnelValley(d_model, d_ff, segment_lengths, shorten_factor,
                        n_heads, dropout, dropout_shared_axes,
                        mode, ff_activation),
         tl.LayerNorm(),  # vecs
         conv_layer,
-        tl.Dense(vocab_size),  # vecs
+        tl.Dense(vocab_size*_channels),  # vecs
+        tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+            x, (x.shape[0], x.shape[1] * _channels, -1)), n_out=1),
         tl.LogSoftmax(),  # vecs
     )

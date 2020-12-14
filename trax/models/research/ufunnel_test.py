@@ -50,27 +50,29 @@ from trax.models.research.funnel_transformer import UFunnel
 
 class FunnelTransformerTest(parameterized.TestCase):
 
-    def test_ufunnel_forward_shape(self):
+    def test_ufunnel_forward_shape_flat(self):
         vocab_size = 16
+        tokens = 3*2*2*2*2*2
         model = UFunnel(
             vocab_size, d_model=32, d_ff=64,
             n_heads=2, segment_lengths=(2,),
             use_conv=True)
-        x = np.ones((3, 8)).astype(np.int32)
+        x = np.ones((3, tokens)).astype(np.int32)
         _, _ = model.init(shapes.signature(x))
         y = model(x)
-        self.assertEqual(y.shape, (3, 8, vocab_size))
+        self.assertEqual(y.shape, (3, tokens, vocab_size))
 
-    def test_ufunnel_forward_shape_deeper(self):
+    def test_ufunnel_forward_shape_deep(self):
         vocab_size = 16
+        tokens = 3*2*2*2*2*2
         model = UFunnel(
             vocab_size, d_model=32, d_ff=64,
-            n_heads=2, segment_lengths=(2,2,2),
+            n_heads=2, segment_lengths=(2,2),
             use_conv=True)
-        x = np.ones((3, 8)).astype(np.int32)
+        x = np.ones((3, tokens)).astype(np.int32)
         _, _ = model.init(shapes.signature(x))
         y = model(x)
-        self.assertEqual(y.shape, (3, 8, vocab_size))
+        self.assertEqual(y.shape, (3, tokens, vocab_size))
 
 
 if __name__ == '__main__':
