@@ -26,17 +26,6 @@ from trax.models.research.funnel_transformer import UFunnel, _UFunnelValley
 
 class FunnelTransformerTest(parameterized.TestCase):
 
-  def test_ufunnel_valley_forward_shape(self):
-    vocab_size = 16
-    model = tl.Serial(_UFunnelValley(512, 2048, (2,2), 2,
-                           8, 0.1, None,
-                           'train', tl.Relu))
-
-    x = np.ones((3, 6, vocab_size)).astype(np.int32)
-    _, _ = model.init(shapes.signature(x))
-    y = model(x)
-    self.assertEqual(y.shape, (3, 6, vocab_size))
-
   def test_ufunnel_forward_shape_ds(self):
     vocab_size = 16
     model = UFunnel(

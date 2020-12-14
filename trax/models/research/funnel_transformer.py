@@ -551,12 +551,15 @@ def _UFunnelValley(d_model,
         _DecoderBlock(d_model, d_ff, n_heads,
                     dropout, dropout_shared_axes, mode, ff_activation)
         for _ in range(current_len)]
+
+    if n == 1:
+        return [pre_decoder_blocks]
+        
     post_decoder_blocks = [
         _DecoderBlock(d_model, d_ff, n_heads,
                     dropout, dropout_shared_axes, mode, ff_activation)
         for _ in range(current_len)]               
-    if n == 1:
-        return [pre_decoder_blocks]
+
 
     funnel_block = _FunnelDecoderBlock(
       shorten_factor, d_model, d_ff, n_heads, dropout, dropout_shared_axes,
@@ -599,12 +602,17 @@ def UFunnel(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
       tl.PositionalEncoding(max_len=max_len, mode=mode)]
+
   conv_layer = tl.Serial(
     tl.CausalConv(d_model, shorten_factor),
     tl.Relu()
   ) if use_conv else None
+
+  merge_layer = tl.Conv(kernel_size=3, strides=3, padding='VALID', filters=1)
+
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
+      merge_layer,               # toks
       tl.ShiftRight(mode=mode),  # toks
       positional_encoder,        # vecs
       _UFunnelValley(d_model, d_ff, segment_lengths, shorten_factor,
