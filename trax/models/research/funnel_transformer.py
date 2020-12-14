@@ -590,7 +590,7 @@ def UFunnel(vocab_size,
             mode='train',
             ff_activation=tl.Relu,
             use_conv=False):
-
+    assert use_conv #TODO @mvxxx
     assert segment_lengths
     if shorten_factor != 2:
         raise ValueError('Only shorten_factor==2 supported')

@@ -54,22 +54,23 @@ class FunnelTransformerTest(parameterized.TestCase):
         vocab_size = 16
         model = UFunnel(
             vocab_size, d_model=32, d_ff=64,
-            n_heads=2, segment_lengths=(2,))
+            n_heads=2, segment_lengths=(2,),
+            use_conv=True)
         x = np.ones((3, 8)).astype(np.int32)
         _, _ = model.init(shapes.signature(x))
         y = model(x)
         self.assertEqual(y.shape, (3, 8, vocab_size))
 
     def test_ufunnel_forward_shape_deeper(self):
-        return
         vocab_size = 16
         model = UFunnel(
             vocab_size, d_model=32, d_ff=64,
-            n_heads=2, segment_lengths=(2, 2, 2))
-        x = np.ones((3, 6)).astype(np.int32)
+            n_heads=2, segment_lengths=(2,2,2),
+            use_conv=True)
+        x = np.ones((3, 8)).astype(np.int32)
         _, _ = model.init(shapes.signature(x))
         y = model(x)
-        self.assertEqual(y.shape, (3, 6, vocab_size))
+        self.assertEqual(y.shape, (3, 8, vocab_size))
 
 
 if __name__ == '__main__':
