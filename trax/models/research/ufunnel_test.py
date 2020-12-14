@@ -23,38 +23,54 @@ from absl.testing import parameterized
 from trax import layers as tl, shapes
 from trax.models.research.funnel_transformer import UFunnel, _UFunnelValley
 
+# coding=utf-8
+# Copyright 2020 The Trax Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Lint as: python3
+"""Tests for Funnel-Transformer models."""
+
+from absl.testing import absltest
+from absl.testing import parameterized
+
+from trax import shapes
+from trax.models.research.funnel_transformer import UFunnel
+
 
 class FunnelTransformerTest(parameterized.TestCase):
 
-  def test_ufunnel_forward_shape_ds(self):
-    vocab_size = 16
-    model = UFunnel(
-        vocab_size, d_model=32, d_ff=64,
-        n_heads=2, segment_lengths=(2,2,2))
-    x = np.ones((1, 3072)).astype(np.int32)
-    _, _ = model.init(shapes.signature(x))
-    y = model(x)
-    self.assertEqual(y.shape, (1, 3072, vocab_size))
+    def test_ufunnel_forward_shape(self):
+        vocab_size = 16
+        model = UFunnel(
+            vocab_size, d_model=32, d_ff=64,
+            n_heads=2, segment_lengths=(2,))
+        x = np.ones((3, 8)).astype(np.int32)
+        _, _ = model.init(shapes.signature(x))
+        y = model(x)
+        self.assertEqual(y.shape, (3, 8, vocab_size))
 
-  def test_ufunnel_forward_shape(self):
-    vocab_size = 16
-    model = UFunnel(
-        vocab_size, d_model=32, d_ff=64,
-        n_heads=2, segment_lengths=(2,2,2))
-    x = np.ones((3, 8)).astype(np.int32)
-    _, _ = model.init(shapes.signature(x))
-    y = model(x)
-    self.assertEqual(y.shape, (3, 8, vocab_size))
+    def test_ufunnel_forward_shape_deeper(self):
+        return
+        vocab_size = 16
+        model = UFunnel(
+            vocab_size, d_model=32, d_ff=64,
+            n_heads=2, segment_lengths=(2, 2, 2))
+        x = np.ones((3, 6)).astype(np.int32)
+        _, _ = model.init(shapes.signature(x))
+        y = model(x)
+        self.assertEqual(y.shape, (3, 6, vocab_size))
 
-  def test_ufunnel_forward_shape_deeper(self):
-    return
-    vocab_size = 16
-    model = UFunnel(
-        vocab_size, d_model=32, d_ff=64,
-        n_heads=2, segment_lengths=(2,2,2))
-    x = np.ones((3, 6)).astype(np.int32)
-    _, _ = model.init(shapes.signature(x))
-    y = model(x)
-    self.assertEqual(y.shape, (3, 6, vocab_size))
+
 if __name__ == '__main__':
-  absltest.main()
+    absltest.main()
