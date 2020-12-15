@@ -567,11 +567,11 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(mode=mode),  # toks
       positional_encoder,  # vecs
       pre_decoder_blocks,  # vecs
-      tl.Residual(
-          tl.ShiftRight(n_positions=total_shorten_factor - 1),
-          funnel_blocks,
-          _UpsamplerLM(total_shorten_factor, d_model)
-      ),
+      tl.Dup(),
+      tl.ShiftRight(n_positions=total_shorten_factor - 1),
+      funnel_blocks,
+      _UpsamplerLM(total_shorten_factor, d_model),
+      tl.Concatenate(),
       conv_layer,
       post_decoder_blocks,
       tl.Dense(vocab_size),  # vecs
