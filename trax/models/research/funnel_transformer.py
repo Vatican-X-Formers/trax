@@ -448,7 +448,7 @@ def _FunnelDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
-  pooling = PoolLayer(tl.AvgPool, pool_size=(shorten_factor,),
+  pooling = PoolLayer(tl.MaxPool, pool_size=(shorten_factor,),
                       strides=(shorten_factor,), separate_cls=False)
 
   causal_attention = FunnelCausalAttention(
