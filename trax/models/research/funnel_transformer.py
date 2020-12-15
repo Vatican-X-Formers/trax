@@ -618,7 +618,7 @@ def UFunnel(vocab_size,
 
     # Assemble and return the model.
     return tl.Serial(  # tokens (or chunked tuple of tokens)
-        tl.ShiftRight(mode=mode),  # toks
+        tl.ShiftRight(mode=mode, n_positions=_channels),  # toks
         positional_encoder,  # vecs
         merge_layer,  # toks
         _UFunnelValley(d_model, d_ff, segment_lengths, shorten_factor,
