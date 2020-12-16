@@ -27,7 +27,7 @@ class FunnelDotProductCausalAttention(DotProductCausalAttention):
     mask = numpy_.repeat(mask, shorten_factor, axis=-1)
     mask = numpy_.pad(mask, ((0, 0), (0, n_keys - mask.shape[1])))
     if self.upsample:
-      mask = mask.T
+      mask = mask[::-1, ::-1].T
     return mask
 
   def forward(self, inputs):
