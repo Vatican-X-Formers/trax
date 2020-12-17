@@ -551,8 +551,8 @@ def _UFunnelValley(d_model,
                    shorten_factor):
     n = len(segment_lengths)
     assert n
-    # if shorten_factor != 2:
-    #     raise ValueError('Only shorten factor == 2 is supported.')
+    if shorten_factor != 2:
+        raise ValueError('Only shorten factor == 2 is supported.')
 
     current_len = segment_lengths[0]
 
@@ -602,8 +602,8 @@ def UFunnel(vocab_size,
             use_conv=False):
     assert use_conv #TODO @mvxxx
     assert segment_lengths
-    #if shorten_factor != 2:
-    #    raise ValueError('Only shorten_factor==2 supported')
+    if shorten_factor != 2:
+        raise ValueError('Only shorten_factor==2 supported')
 
     positional_encoder = [
         tl.Embedding(vocab_size, d_model),
@@ -622,14 +622,17 @@ def UFunnel(vocab_size,
     return tl.Serial(  # tokens (or chunked tuple of tokens)
         tl.ShiftRight(mode=mode, n_positions=_channels),  # toks
         positional_encoder,  # vecs
+        tl.Residual(
+            _UFunnelValley(d_model, d_ff, segment_lengths,
+                            n_heads, dropout, dropout_shared_axes,
+                            mode, ff_activation, _channels, shorten_factor),
+            tl.LayerNorm(),  # vecs
+            conv_layer,
+            tl.Dense(vocab_size*_channels),  # vecs
+            tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+                x, (x.shape[0], x.shape[1] * _channels, -1)), n_out=1),
+        ),
         merge_layer,  # toks
-        _UFunnelValley(d_model, d_ff, segment_lengths,
-                       n_heads, dropout, dropout_shared_axes,
-                       mode, ff_activation, _channels, shorten_factor),
-        tl.LayerNorm(),  # vecs
-        conv_layer,
-        tl.Dense(vocab_size*_channels),  # vecs
-        tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
-            x, (x.shape[0], x.shape[1] * _channels, -1)), n_out=1),
+
         tl.LogSoftmax(),  # vecs
     )
