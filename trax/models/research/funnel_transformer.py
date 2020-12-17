@@ -551,8 +551,8 @@ def _UFunnelValley(d_model,
                    shorten_factor):
     n = len(segment_lengths)
     assert n
-    if shorten_factor != 2:
-        raise ValueError('Only shorten factor == 2 is supported.')
+    # if shorten_factor != 2:
+    #     raise ValueError('Only shorten factor == 2 is supported.')
 
     current_len = segment_lengths[0]
 
