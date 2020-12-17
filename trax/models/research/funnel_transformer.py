@@ -542,12 +542,13 @@ def FunnelTransformerLM(vocab_size,
 def _UFunnelValley(d_model,
                    d_ff,
                    segment_lengths,
-                   shorten_factor,
                    n_heads,
                    dropout,
                    dropout_shared_axes,
                    mode,
-                   ff_activation):
+                   ff_activation,
+                   channels,
+                   shorten_factor):
     n = len(segment_lengths)
     assert n
     if shorten_factor != 2:
@@ -576,10 +577,11 @@ def _UFunnelValley(d_model,
     return [
         pre_decoder_blocks,
         tl.Residual(
-            tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
+            tl.ShiftRight(n_positions=shorten_factor-1, mode=mode),
             funnel_block,
-            *_UFunnelValley(d_model, d_ff, segment_lengths[1:], shorten_factor,
-                            n_heads, dropout, dropout_shared_axes, mode, ff_activation),
+            *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
+                            n_heads, dropout, dropout_shared_axes,
+                            mode, ff_activation, channels, shorten_factor),
             _UpsamplerLM(shorten_factor)
         ),
         post_decoder_blocks
@@ -600,8 +602,8 @@ def UFunnel(vocab_size,
             use_conv=False):
     assert use_conv #TODO @mvxxx
     assert segment_lengths
-    if shorten_factor != 2:
-        raise ValueError('Only shorten_factor==2 supported')
+    #if shorten_factor != 2:
+    #    raise ValueError('Only shorten_factor==2 supported')
 
     positional_encoder = [
         tl.Embedding(vocab_size, d_model),
@@ -621,9 +623,9 @@ def UFunnel(vocab_size,
         tl.ShiftRight(mode=mode, n_positions=_channels),  # toks
         positional_encoder,  # vecs
         merge_layer,  # toks
-        _UFunnelValley(d_model, d_ff, segment_lengths, shorten_factor,
+        _UFunnelValley(d_model, d_ff, segment_lengths,
                        n_heads, dropout, dropout_shared_axes,
-                       mode, ff_activation),
+                       mode, ff_activation, _channels, shorten_factor),
         tl.LayerNorm(),  # vecs
         conv_layer,
         tl.Dense(vocab_size*_channels),  # vecs
