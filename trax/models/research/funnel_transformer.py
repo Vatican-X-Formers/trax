@@ -580,11 +580,11 @@ def FunnelTransformerLM(vocab_size,
   )] + create_decoder_blocks(block_len) for shorten_factor, block_len in
                    zip(shorten_factors, n_funnel_blocks)]
 
-  funnel_upsampler = tl.Serial(_FunnelUpsamplingDecoderBlock(
+  funnel_upsampler = _FunnelUpsamplingDecoderBlock(
       total_shorten_factor, d_model, d_ff, n_heads, dropout,
       dropout_shared_axes,
       mode, ff_activation
-  ))
+  )
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, shorten_factors[0]),
