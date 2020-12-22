@@ -835,8 +835,8 @@ def random_sequence_inputs(
 
   def random_minibatches(n_devices):
     """Generate a stream of random mini-batches."""
-    assert n_devices > 0
-    rand = np.random.random_integers
+    assert batch_size % n_devices == 0
+    rand = np.random.randint
     input_shape = (batch_size, train_length)
     mask = np.ones((batch_size, train_length))
 
@@ -848,19 +848,38 @@ def random_sequence_inputs(
   return Inputs(random_minibatches)
 
 
-def dictionary_lookup():
-  my_dict = {x: random.choice(string.ascii_lowercase[1:]) for x in
-             string.ascii_lowercase[1:]}
+def dictionary_lookup(vocab_size, k):
+  my_dict = {x: np.random.randint(1, vocab_size - 1) for x in
+             range(1, vocab_size)}
   my_dict_str = [(k, v) for k, v in my_dict.items()]
   np.random.shuffle(my_dict_str)
   my_dict_str = np.concatenate(my_dict_str)
-  # train_src.write(" ".join(my_dict_str) + '\n')
-  key = random.choices(string.ascii_lowercase[1:], k=10)
+  key = np.random.randint(1, vocab_size - 1, (k,))
   value = itemgetter(*key)(my_dict)
   target = np.concatenate([(k, v) for k, v in zip(key, value)])
-  target = list(target)
-  # train_tgt.write(" ".join(target) + '\n')
+
   return my_dict_str, target
+
+
+@gin.configurable()
+def dictionary_lookup_inputs(vocab_size=gin.REQUIRED,
+                             batch_size=gin.REQUIRED, n_queries=gin.REQUIRED):
+  def random_minibatches(n_devices):
+    assert batch_size % n_devices == 0
+
+    dicts, queries = map(np.array, zip(
+        *[dictionary_lookup(vocab_size, n_queries) for _ in range(batch_size)]))
+    assert dicts.shape[1] == 2 * (vocab_size - 1)
+    assert queries.shape[1] == 2 * n_queries
+
+    inputs = np.concatenate([dicts, queries], axis=1)
+
+    masks = np.concatenate([np.zeros((batch_size, dicts.shape[1])),
+                            np.ones((batch_size, queries.shape[1]))], axis=1)
+
+    yield inputs, inputs, masks
+
+  return Inputs(random_minibatches)
 
 
 @gin.configurable()
