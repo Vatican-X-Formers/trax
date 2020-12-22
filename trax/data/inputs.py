@@ -838,11 +838,12 @@ def random_sequence_inputs(
     assert n_devices > 0
     rand = np.random.random_integers
     input_shape = (batch_size, train_length)
+    mask = np.ones((batch_size, train_length))
 
     while True:
       inp = rand(1, vocab_size - 1, input_shape)
       inp = inp.astype(input_dtype)
-      yield inp, inp
+      yield inp, inp, mask
 
   return Inputs(random_minibatches)
 
