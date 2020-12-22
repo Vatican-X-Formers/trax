@@ -867,17 +867,16 @@ def dictionary_lookup_inputs(vocab_size=gin.REQUIRED,
   def random_minibatches(n_devices):
     assert batch_size % n_devices == 0
 
-    dicts, queries = map(np.array, zip(
-        *[dictionary_lookup(vocab_size, n_queries) for _ in range(batch_size)]))
-    assert dicts.shape[1] == 2 * (vocab_size - 1)
-    assert queries.shape[1] == 2 * n_queries
+    masks = np.concatenate([np.zeros((batch_size, 2 * (vocab_size - 1))),
+                            np.ones((batch_size, 2 * n_queries))], axis=1)
 
-    inputs = np.concatenate([dicts, queries], axis=1)
+    while True:
+      dicts, queries = map(np.array, zip(
+          *[dictionary_lookup(vocab_size, n_queries) for _ in
+            range(batch_size)]))
+      inputs = np.concatenate([dicts, queries], axis=1)
 
-    masks = np.concatenate([np.zeros((batch_size, dicts.shape[1])),
-                            np.ones((batch_size, queries.shape[1]))], axis=1)
-
-    yield inputs, inputs, masks
+      yield inputs, inputs, masks
 
   return Inputs(random_minibatches)
 
