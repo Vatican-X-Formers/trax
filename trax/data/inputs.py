@@ -70,6 +70,8 @@ lines from `my_file.txt` as follows::
 
 import math
 import random
+import string
+from operator import itemgetter
 
 from absl import logging
 
@@ -816,6 +818,48 @@ def _pad_to_multiple_of(x, y, axis):
   pad_widths[axis] = (0, int(pad_len - x.shape[axis]))
   return np.pad(x, pad_widths, mode='constant',
                 constant_values=x.dtype.type(0))
+
+
+@gin.configurable()
+def random_sequence_inputs(
+    batch_size=gin.REQUIRED, vocab_size=gin.REQUIRED,
+    train_length=gin.REQUIRED, input_dtype=jnp.int32):
+  """Random inputs for TransformerLM debugging (testing leakage)
+
+  Args:
+    input_dtype: the type of the inputs (int32 by default).
+
+  Returns:
+    trax.inputs.Inputs
+  """
+
+  def random_minibatches(n_devices):
+    """Generate a stream of random mini-batches."""
+    assert n_devices > 0
+    rand = np.random.random_integers
+    input_shape = (batch_size, train_length)
+
+    while True:
+      inp = rand(1, vocab_size - 1, input_shape)
+      inp = inp.astype(input_dtype)
+      yield inp, inp
+
+  return Inputs(random_minibatches)
+
+
+def dictionary_lookup():
+  my_dict = {x: random.choice(string.ascii_lowercase[1:]) for x in
+             string.ascii_lowercase[1:]}
+  my_dict_str = [(k, v) for k, v in my_dict.items()]
+  np.random.shuffle(my_dict_str)
+  my_dict_str = np.concatenate(my_dict_str)
+  # train_src.write(" ".join(my_dict_str) + '\n')
+  key = random.choices(string.ascii_lowercase[1:], k=10)
+  value = itemgetter(*key)(my_dict)
+  target = np.concatenate([(k, v) for k, v in zip(key, value)])
+  target = list(target)
+  # train_tgt.write(" ".join(target) + '\n')
+  return my_dict_str, target
 
 
 @gin.configurable()
