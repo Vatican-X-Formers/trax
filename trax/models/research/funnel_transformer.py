@@ -33,8 +33,10 @@ def print_and_return(args, label):
     print(label, args.shape)
     return args
 
-def IdPrint(label = None):
-  return tl.Fn('IdPrint', lambda x: print_and_return(x, label))
+
+def IdPrint(label=None):
+    return tl.Fn('IdPrint', lambda x: print_and_return(x, label))
+
 
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
@@ -577,7 +579,7 @@ def _UFunnelValley(d_model,
     return [
         pre_decoder_blocks,
         tl.Residual(
-            tl.ShiftRight(n_positions=shorten_factor-1, mode=mode),
+            tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
             funnel_block,
             *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
                             n_heads, dropout, dropout_shared_axes,
@@ -600,7 +602,7 @@ def UFunnel(vocab_size,
             mode='train',
             ff_activation=tl.Relu,
             use_conv=False):
-    assert use_conv #TODO @mvxxx
+    assert use_conv  # TODO @mvxxx
     assert segment_lengths
     if shorten_factor != 2:
         raise ValueError('Only shorten_factor==2 supported')
@@ -622,26 +624,11 @@ def UFunnel(vocab_size,
     return tl.Serial(  # tokens (or chunked tuple of tokens)
         tl.ShiftRight(mode=mode, n_positions=_channels),  # toks
         positional_encoder,  # vecs
-        tl.Dup(),
-        tl.Parallel(
-            [
-                merge_layer,  # toks
-                _UFunnelValley(d_model, d_ff, segment_lengths,
-                               n_heads, dropout, dropout_shared_axes,
-                               mode, ff_activation, _channels, shorten_factor),
-                tl.LayerNorm(),  # vecs
-                conv_layer,
-                tl.Dense(vocab_size * _channels),  # vecs
-                tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
-                    x, (x.shape[0], x.shape[1] * _channels, -1)), n_out=1),
-
-            ],
-            [
-                tl.LayerNorm(),
-                conv_layer,
-                tl.Dense(vocab_size),
-            ]
-        ),
-        tl.Add(),
+        _UFunnelValley(d_model, d_ff, segment_lengths,
+                       n_heads, dropout, dropout_shared_axes,
+                       mode, ff_activation, _channels, shorten_factor),
+        tl.LayerNorm(),  # vecs
+        conv_layer,
+        tl.Dense(vocab_size),  # vecs
         tl.LogSoftmax(),  # vecs
     )
