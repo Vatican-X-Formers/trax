@@ -617,7 +617,7 @@ def UFunnel(vocab_size,
         tl.Relu()
     ) if use_conv else None
 
-    _channels = 3
+    _channels = 1
     merge_layer = tl.Conv1d(kernel_size=_channels, stride=3, padding='VALID', filters=d_model)
 
     # Assemble and return the model.
