@@ -115,6 +115,7 @@ def _Upsampler(total_pool_size, separate_cls):
 def _UpsamplerLM(shorten_factor, d_embedding):
   return tl.Serial(
       tl.Dense(shorten_factor * d_embedding),
+      tl.Relu(),
       tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
           x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
   )
@@ -557,10 +558,11 @@ def FunnelTransformerLM(vocab_size,
   )] + create_decoder_blocks(block_len) for shorten_factor, block_len in
                    zip(shorten_factors, n_funnel_blocks)]
 
-  conv_layer = tl.Serial(
-      tl.CausalConv(d_model, shorten_factors[0]),
+  concat = [
+      tl.Concatenate(),
+      tl.Dense(d_model),
       tl.Relu()
-  ) if use_conv else []
+  ]
 
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
@@ -571,8 +573,7 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(n_positions=total_shorten_factor - 1),
       funnel_blocks,
       _UpsamplerLM(total_shorten_factor, d_model),
-      tl.Concatenate(),
-      conv_layer,
+      concat,
       post_decoder_blocks,
       tl.Dense(vocab_size),  # vecs
   )
