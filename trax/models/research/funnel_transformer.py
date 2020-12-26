@@ -659,7 +659,6 @@ def _UFunnelValley(d_model,
         post_decoder_blocks
     ]
 
-
 def UFunnel(vocab_size,
             d_model=512,
             d_ff=2048,
@@ -672,7 +671,7 @@ def UFunnel(vocab_size,
             mode='train',
             ff_activation=tl.Relu,
             use_conv=False):
-    assert use_conv  # TODO @mvxxx
+    assert use_conv #TODO @mvxxx
     assert segment_lengths
     if shorten_factor != 2:
         raise ValueError('Only shorten_factor==2 supported')
@@ -687,18 +686,33 @@ def UFunnel(vocab_size,
         tl.Relu()
     ) if use_conv else None
 
-    _channels = 1
-    #merge_layer = tl.Conv1d(kernel_size=_channels, stride=3, padding='VALID', filters=d_model)
+    _channels = 3
+    merge_layer = tl.Conv1d(kernel_size=_channels, stride=3, padding='VALID', filters=d_model)
 
     # Assemble and return the model.
     return tl.Serial(  # tokens (or chunked tuple of tokens)
         tl.ShiftRight(mode=mode, n_positions=_channels),  # toks
         positional_encoder,  # vecs
-        _UFunnelValley(d_model, d_ff, segment_lengths,
-                       n_heads, dropout, dropout_shared_axes,
-                       mode, ff_activation, _channels, shorten_factor),
-        tl.LayerNorm(),  # vecs
-        conv_layer,
-        tl.Dense(vocab_size),  # vecs
+        tl.Dup(),
+        tl.Parallel(
+            [
+                merge_layer,  # toks
+                _UFunnelValley(d_model, d_ff, segment_lengths,
+                               n_heads, dropout, dropout_shared_axes,
+                               mode, ff_activation, _channels, shorten_factor),
+                tl.LayerNorm(),  # vecs
+                conv_layer,
+                tl.Dense(vocab_size * _channels),  # vecs
+                tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+                    x, (x.shape[0], x.shape[1] * _channels, -1)), n_out=1),
+
+            ],
+            [
+                tl.LayerNorm(),
+                conv_layer,
+                tl.Dense(vocab_size),
+            ]
+        ),
+        tl.Add(),
         tl.LogSoftmax(),  # vecs
     )
