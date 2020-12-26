@@ -605,3 +605,100 @@ def FunnelTransformerLM(vocab_size,
       post_decoder_blocks,
       tl.Dense(vocab_size),  # vecs
   )
+
+
+
+def _UFunnelValley(d_model,
+                   d_ff,
+                   segment_lengths,
+                   n_heads,
+                   dropout,
+                   dropout_shared_axes,
+                   mode,
+                   ff_activation,
+                   channels,
+                   shorten_factor):
+    n = len(segment_lengths)
+    assert n
+    if shorten_factor != 2:
+        raise ValueError('Only shorten factor == 2 is supported.')
+
+    current_len = segment_lengths[0]
+
+    pre_decoder_blocks = [
+        _DecoderBlock(d_model, d_ff, n_heads,
+                      dropout, dropout_shared_axes, mode, ff_activation)
+        for _ in range(current_len)]
+
+    if n == 1:
+        return [pre_decoder_blocks]
+
+    post_decoder_blocks = [
+        _DecoderBlock(d_model, d_ff, n_heads,
+                      dropout, dropout_shared_axes, mode, ff_activation)
+        for _ in range(current_len)]
+
+    funnel_block = _FunnelDecoderBlock(
+        shorten_factor, d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+        mode, ff_activation
+    )
+
+    funnel_upsampler = _UpsamplerLM(shorten_factor, d_model)
+
+
+    return [
+        pre_decoder_blocks,
+        tl.Residual(
+            tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
+            funnel_block,
+            *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
+                            n_heads, dropout, dropout_shared_axes,
+                            mode, ff_activation, channels, shorten_factor),
+            funnel_upsampler
+        ),
+        post_decoder_blocks
+    ]
+
+
+def UFunnel(vocab_size,
+            d_model=512,
+            d_ff=2048,
+            segment_lengths=(2, 2, 2),
+            shorten_factor=2,
+            n_heads=8,
+            max_len=2048,
+            dropout=0.1,
+            dropout_shared_axes=None,
+            mode='train',
+            ff_activation=tl.Relu,
+            use_conv=False):
+    assert use_conv  # TODO @mvxxx
+    assert segment_lengths
+    if shorten_factor != 2:
+        raise ValueError('Only shorten_factor==2 supported')
+
+    positional_encoder = [
+        tl.Embedding(vocab_size, d_model),
+        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
+        tl.PositionalEncoding(max_len=max_len, mode=mode)]
+
+    conv_layer = tl.Serial(
+        tl.CausalConv(d_model, shorten_factor),
+        tl.Relu()
+    ) if use_conv else None
+
+    _channels = 1
+    #merge_layer = tl.Conv1d(kernel_size=_channels, stride=3, padding='VALID', filters=d_model)
+
+    # Assemble and return the model.
+    return tl.Serial(  # tokens (or chunked tuple of tokens)
+        tl.ShiftRight(mode=mode, n_positions=_channels),  # toks
+        positional_encoder,  # vecs
+        _UFunnelValley(d_model, d_ff, segment_lengths,
+                       n_heads, dropout, dropout_shared_axes,
+                       mode, ff_activation, _channels, shorten_factor),
+        tl.LayerNorm(),  # vecs
+        conv_layer,
+        tl.Dense(vocab_size),  # vecs
+        tl.LogSoftmax(),  # vecs
+    )
