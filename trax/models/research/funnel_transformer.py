@@ -606,7 +606,12 @@ def FunnelTransformerLM(vocab_size,
       tl.Dense(vocab_size),  # vecs
   )
 
+def _UpsamplerLMClassic(shorten_factor):
+    def _upsample(short):
+        new_vecs = short.repeat(shorten_factor, axis=1)
+        return new_vecs
 
+    return tl.Fn('UpsamplerLM', _upsample)
 
 def _UFunnelValley(d_model,
                    d_ff,
@@ -643,7 +648,7 @@ def _UFunnelValley(d_model,
         mode, ff_activation
     )
 
-    funnel_upsampler = _UpsamplerLM(shorten_factor, d_model)
+    funnel_upsampler = _UpsamplerLMClassic(shorten_factor)
 
 
     return [
