@@ -616,12 +616,9 @@ def _UFunnelValley(d_model,
                    dropout_shared_axes,
                    mode,
                    ff_activation,
-                   channels,
                    shorten_factor):
     n = len(segment_lengths)
     assert n
-    if shorten_factor != 2:
-        raise ValueError('Only shorten factor == 2 is supported.')
 
     current_len = segment_lengths[0]
 
@@ -653,7 +650,7 @@ def _UFunnelValley(d_model,
             funnel_block,
             *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
                             n_heads, dropout, dropout_shared_axes,
-                            mode, ff_activation, channels, shorten_factor),
+                            mode, ff_activation, shorten_factor),
             funnel_upsampler
         ),
         post_decoder_blocks
@@ -674,8 +671,6 @@ def UFunnel(vocab_size,
             use_conv=False):
     assert use_conv  # TODO @mvxxx
     assert segment_lengths
-    if shorten_factor != 2:
-        raise ValueError('Only shorten_factor==2 supported')
 
     positional_encoder = [
         tl.Embedding(vocab_size, d_model),
@@ -696,7 +691,7 @@ def UFunnel(vocab_size,
         positional_encoder,  # vecs
         _UFunnelValley(d_model, d_ff, segment_lengths,
                        n_heads, dropout, dropout_shared_axes,
-                       mode, ff_activation, _channels, shorten_factor),
+                       mode, ff_activation, shorten_factor),
         tl.LayerNorm(),  # vecs
         conv_layer,
         tl.Dense(vocab_size),  # vecs

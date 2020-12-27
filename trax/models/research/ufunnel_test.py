@@ -56,7 +56,7 @@ class FunnelTransformerTest(parameterized.TestCase):
         model = UFunnel(
             vocab_size, d_model=32, d_ff=64,
             n_heads=2, segment_lengths=(2,),
-            use_conv=True)
+            use_conv=True, shorten_factor=3)
         x = np.ones((3, tokens)).astype(np.int32)
         _, _ = model.init(shapes.signature(x))
         y = model(x)
@@ -68,7 +68,7 @@ class FunnelTransformerTest(parameterized.TestCase):
         model = UFunnel(
             vocab_size, d_model=32, d_ff=64,
             n_heads=2, segment_lengths=(2,2),
-            use_conv=True)
+            use_conv=True, shorten_factor=3)
         x = np.ones((3, tokens)).astype(np.int32)
         _, _ = model.init(shapes.signature(x))
         y = model(x)
