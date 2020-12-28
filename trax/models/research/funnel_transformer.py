@@ -648,14 +648,12 @@ def _UFunnelValley(d_model,
 
     return [
         pre_decoder_blocks,
-        tl.Residual(
-            tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
-            funnel_block,
-            *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
-                            n_heads, dropout, dropout_shared_axes,
-                            mode, ff_activation, channels, shorten_factor),
-            funnel_upsampler
-        ),
+        tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
+        funnel_block,
+        *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
+                        n_heads, dropout, dropout_shared_axes,
+                        mode, ff_activation, channels, shorten_factor),
+        funnel_upsampler,
         post_decoder_blocks
     ]
 
