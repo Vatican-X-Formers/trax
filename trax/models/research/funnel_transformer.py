@@ -687,18 +687,21 @@ def UFunnel(vocab_size,
         tl.Relu()
     ) if use_conv else None
 
-    _channels = 1
-    #merge_layer = tl.Conv1d(kernel_size=_channels, stride=3, padding='VALID', filters=d_model)
+    _channels = 3
+    merge_layer = tl.Conv1d(kernel_size=_channels, stride=_channels, padding='VALID', filters=d_model)
 
     # Assemble and return the model.
     return tl.Serial(  # tokens (or chunked tuple of tokens)
         tl.ShiftRight(mode=mode, n_positions=_channels),  # toks
         positional_encoder,  # vecs
+        merge_layer,
         _UFunnelValley(d_model, d_ff, segment_lengths,
                        n_heads, dropout, dropout_shared_axes,
                        mode, ff_activation, _channels, shorten_factor),
         tl.LayerNorm(),  # vecs
         conv_layer,
-        tl.Dense(vocab_size),  # vecs
+        tl.Dense(vocab_size*_channels),  # vecs
+        tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+            x, (x.shape[0], x.shape[1] * _channels, -1)), n_out=1),
         tl.LogSoftmax(),  # vecs
     )
