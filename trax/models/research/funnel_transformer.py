@@ -694,14 +694,26 @@ def UFunnel(vocab_size,
     return tl.Serial(  # tokens (or chunked tuple of tokens)
         tl.ShiftRight(mode=mode, n_positions=_channels),  # toks
         positional_encoder,  # vecs
-        merge_layer,
-        _UFunnelValley(d_model, d_ff, segment_lengths,
-                       n_heads, dropout, dropout_shared_axes,
-                       mode, ff_activation, _channels, shorten_factor),
-        tl.LayerNorm(),  # vecs
-        conv_layer,
-        tl.Dense(vocab_size*_channels),  # vecs
-        tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
-            x, (x.shape[0], x.shape[1] * _channels, -1)), n_out=1),
+        tl.Dup(),
+        tl.Parallel(
+            [
+                merge_layer,  # toks
+                _UFunnelValley(d_model, d_ff, segment_lengths,
+                               n_heads, dropout, dropout_shared_axes,
+                               mode, ff_activation, _channels, shorten_factor),
+                tl.LayerNorm(),  # vecs
+                conv_layer,
+                tl.Dense(vocab_size * _channels),  # vecs
+                tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+                    x, (x.shape[0], x.shape[1] * _channels, -1)), n_out=1),
+
+            ],
+            [
+                tl.LayerNorm(),
+                conv_layer,
+                tl.Dense(vocab_size),
+            ]
+        ),
+        tl.Add(),
         tl.LogSoftmax(),  # vecs
     )
