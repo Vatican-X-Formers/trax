@@ -115,6 +115,7 @@ def _Upsampler(total_pool_size, separate_cls):
 def _UpsamplerLM(shorten_factor, d_embedding):
   return tl.Serial(
       tl.Dense(shorten_factor * d_embedding),
+      tl.Relu(),
       tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
           x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
   )
