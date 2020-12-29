@@ -606,6 +606,12 @@ def FunnelTransformerLM(vocab_size,
       tl.Dense(vocab_size),  # vecs
   )
 
+def print_and_return(args, label):
+    print(label, args.shape)
+    return args
+
+def IdPrint(label = None):
+  return tl.Fn('IdPrint', lambda x: print_and_return(x, label))
 
 
 def _UFunnelValley(d_model,
@@ -650,8 +656,8 @@ def _UFunnelValley(d_model,
             funnel_block,
             *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
                             n_heads, dropout, dropout_shared_axes,
-                            mode, ff_activation, shorten_factor),
-            funnel_upsampler
+                            mode, ff_activation, 2),
+            funnel_upsampler,
         ),
         post_decoder_blocks
     ]
