@@ -586,7 +586,7 @@ def FunnelTransformerLM(vocab_size,
   )
 
   conv_layer = tl.Serial(
-      tl.CausalConv(vocab_size, total_shorten_factor),
+      tl.CausalConv(d_ff, total_shorten_factor),
       tl.Relu()
   )
 
