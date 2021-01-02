@@ -601,4 +601,5 @@ def FunnelTransformerLM(vocab_size,
       funnel_upsampler,
       tl.Concatenate(),
       conv_layer,
+      tl.Dense(vocab_size)
   )
