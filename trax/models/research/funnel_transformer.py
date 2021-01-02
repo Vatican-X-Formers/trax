@@ -674,8 +674,7 @@ def UFunnel(vocab_size,
             dropout_shared_axes=None,
             mode='train',
             ff_activation=tl.Relu,
-            use_conv=False):
-    assert use_conv  # TODO @mvxxx
+            use_conv=True):
     assert segment_lengths
 
     positional_encoder = [
