@@ -489,6 +489,7 @@ def _FunnelUpsamplingDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
 
   return [
       tl.Select([1, 0, 0, 1]),  # h, h', h', h
+      tl.LayerNorm(),  # h
       causal_attention,
       dropout_,
       tl.Residual(
@@ -586,7 +587,7 @@ def FunnelTransformerLM(vocab_size,
   )
 
   conv_layer = tl.Serial(
-      tl.CausalConv(d_ff, total_shorten_factor),
+      tl.CausalConv(d_model, total_shorten_factor),
       tl.Relu()
   )
 
@@ -599,6 +600,7 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(n_positions=total_shorten_factor - 1),
       funnel_blocks,
       funnel_upsampler,
+      tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
       tl.Dense(vocab_size)
