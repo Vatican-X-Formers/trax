@@ -488,7 +488,6 @@ def _FunnelUpsamplingDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Parallel(None, tl.LayerNorm()),
       tl.Select([1, 0, 0, 1]),  # h, h', h', h
       causal_attention,
       dropout_,
@@ -556,8 +555,6 @@ def FunnelTransformerLM(vocab_size,
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
       tl.PositionalEncoding(max_len=max_len, mode=mode)]
 
-  n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
-
   def create_decoder_blocks(n_layers):
     if n_layers == 0:
       return []
@@ -569,8 +566,6 @@ def FunnelTransformerLM(vocab_size,
         for _ in range(n_layers)]
     ln = tl.LayerNorm()
     return decoder_blocks + [ln]
-
-  pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks)
 
   total_shorten_factor = functools.reduce(lambda x, y: x * y, shorten_factors)
 
@@ -586,6 +581,11 @@ def FunnelTransformerLM(vocab_size,
       mode, ff_activation
   )
 
+  dense_join = tl.Serial(
+      tl.Dense(d_model),
+      ff_activation()
+  )
+
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_shorten_factor),
       ff_activation()
@@ -595,12 +595,13 @@ def FunnelTransformerLM(vocab_size,
   return tl.Serial(  # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       positional_encoder,  # vecs
-      pre_decoder_blocks,  # vecs
+      tl.LayerNorm(),
       tl.Dup(),
       tl.ShiftRight(n_positions=total_shorten_factor - 1),
       funnel_blocks,
       funnel_upsampler,
       tl.Concatenate(),
+      dense_join,
       conv_layer,
       tl.Dense(vocab_size)
   )
