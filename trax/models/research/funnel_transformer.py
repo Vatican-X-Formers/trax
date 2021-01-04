@@ -423,8 +423,7 @@ def FunnelTransformer(vocab_size,
   )
 
 
-from trax.layers.research.rel_attention import RelativeAttentionLayer, \
-  ShiftRightCls
+from trax.layers.research.rel_attention import RelativeAttentionLayer
 from trax.layers import initializers as init
 from trax.layers import core
 
@@ -570,9 +569,9 @@ def CreateMask():
 
       mask = numpy_.tril(numpy_.ones((n_queries, n_queries), dtype=np.bool_))
 
-      if n_queries != n_keys:
+      if shorten_factor != 1:
           mask = numpy_.repeat(mask, shorten_factor, axis=-1)
-          mask = numpy_.pad(mask, ((0, 0), (0, n_keys - mask.shape[1])))
+          # mask = numpy_.pad(mask, ((0, 0), (0, n_keys - mask.shape[1])))
 
       return numpy_.repeat(mask[None, None, :, :], batch_size, axis=0)
 
@@ -582,6 +581,29 @@ def CreateMask():
           cb.Select([2]),
           cb.Fn('create mask layer', calculate_mask, n_out=1)
       )
+
+
+def ZeroPadding(n_positions, embedding_layer, axis=1):
+  def create_zero_pad(vecs):
+    input_shape = np.array(vecs.shape)[:-1] # cut embeddings
+    input_shape[axis] = n_positions
+    padding = np.zeros(input_shape, dtype=np.int)
+    return padding
+
+  def cut_vecs(vecs):
+    return vecs[:, :-n_positions, :]
+
+  return tl.Serial(
+          cb.Branch(
+            tl.Serial(
+              cb.Fn('Create zero padding', create_zero_pad, n_out=1),
+              embedding_layer
+            ),
+            cb.Fn('Cut vecs', cut_vecs, n_out=1),
+          ),
+          tl.Concatenate(axis=axis)
+        ),
+
 
 
 def FunnelTransformerLM(vocab_size,
@@ -637,6 +659,7 @@ def FunnelTransformerLM(vocab_size,
     A Transformer language model as a layer that maps from a tensor of tokens
     to activations over a vocab set.
   """
+
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
@@ -661,8 +684,6 @@ def FunnelTransformerLM(vocab_size,
     return decoder_blocks
 
   pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks, total_pooling_acc)
-  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, total_pooling_acc)
-
   total_shorten_factor = functools.reduce(lambda x, y: x * y, shorten_factors)
 
   funnel_blocks = []
@@ -680,9 +701,11 @@ def FunnelTransformerLM(vocab_size,
       funnel_blocks = funnel_blocks + create_decoder_blocks(block_len, total_pooling_acc)
 
   conv_layer = tl.Serial(
-      tl.CausalConv(d_model, shorten_factors[0]),
+      tl.CausalConv(d_model, total_shorten_factor),
       tl.Relu()
   ) if use_conv else []
+
+  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
 
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
@@ -690,7 +713,8 @@ def FunnelTransformerLM(vocab_size,
       token_encoder,        # vecs
       pre_decoder_blocks,        # vecs
       tl.Residual(
-          tl.ShiftRight(n_positions=total_shorten_factor - 1),
+          ZeroPadding(n_positions=total_shorten_factor-1,
+                      embedding_layer=token_encoder),
           funnel_blocks,
           _UpsamplerLM(total_shorten_factor, d_model)
       ),
