@@ -581,11 +581,6 @@ def FunnelTransformerLM(vocab_size,
       mode, ff_activation
   )
 
-  dense_join = tl.Serial(
-      tl.Dense(d_model),
-      ff_activation()
-  )
-
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_shorten_factor),
       ff_activation()
@@ -600,8 +595,8 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(n_positions=total_shorten_factor - 1),
       funnel_blocks,
       funnel_upsampler,
-      tl.Concatenate(),
-      dense_join,
+      tl.LayerNorm(),
+      tl.Add(),
       conv_layer,
       tl.Dense(vocab_size)
   )
