@@ -586,10 +586,13 @@ def FunnelTransformerLM(vocab_size,
       ff_activation()
   )
 
+  n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
+  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks)
+
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_shorten_factor),
       ff_activation()
-  )
+  ) if use_conv else []
 
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
@@ -603,5 +606,6 @@ def FunnelTransformerLM(vocab_size,
       tl.Concatenate(),
       dense_join,
       conv_layer,
+      post_decoder_blocks,
       tl.Dense(vocab_size)
   )
