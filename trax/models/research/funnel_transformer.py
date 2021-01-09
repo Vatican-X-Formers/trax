@@ -595,19 +595,18 @@ def FunnelTransformerLM(vocab_size,
   return tl.Serial(  # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       positional_encoder,  # vecs
-      tl.LayerNorm(),
       tl.Dup(),
       tl.ShiftRight(n_positions=total_shorten_factor - 1),
       funnel_blocks,
       tl.Select([0, 1, 0]),
       _UpsamplerLM(total_shorten_factor, d_model),
-      tl.LayerNorm(),
+      # tl.LayerNorm(),
       tl.Add(),
+      conv_layer,
       tl.Residual(
         tl.LayerNorm(),
         funnel_upsampler,  # TODO: layernorm?
         tl.LayerNorm(),
       ),
-      conv_layer,
       tl.Dense(vocab_size)
   )
