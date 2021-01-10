@@ -645,6 +645,7 @@ def FunnelTransformerLM(vocab_size,
                                                           total_pooling_acc)
 
   conv_layer = tl.Serial(
+      tl.LayerNorm(),
       tl.CausalConv(d_model, total_shorten_factor),
       ff_activation()
   ) if use_conv else []
