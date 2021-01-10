@@ -282,6 +282,16 @@ def _fast_matrix_shift(x, shift):
 
 
 def CreateAttentionMaskLayer():
+  """Returns a layer that based of queries and keys and a combined pool size
+     before in the funnel transformer computes positional embeddings for
+     causal relative attention calculations.
+
+     Causal attention uses masking to prevent a given sequence position from
+     attending to positions greater than / following it. This is used, for
+     example, when training autoregressive sequence models, or when decoding a
+     sequence symbol by symbol.
+  """
+
   def calculate_mask(queries, keys):
     batch_size = queries.shape[0]
     n_queries, n_keys = queries.shape[-2], keys.shape[-2]
@@ -291,6 +301,17 @@ def CreateAttentionMaskLayer():
     return _funnel_mask(batch_size, n_queries, shorten_factor)
 
   def _funnel_mask(batch_size, n_queries, shorten_factor):
+    """
+    Given function based on shorten factor argument creates a triangle
+    mask that prevents tokens from attending to positions following it.
+
+    If shorten factor is not equal to 1 due to funnel downsampling it
+    adjusts created mask for funnel layer attention by repeating each
+    element shorten_factor times.
+
+    This is because after funnel layer one token attends to shorten_factor
+    different embeddings.
+    """
     numpy_ = jnp if fastmath.is_backend(fastmath.Backend.JAX) else np
 
     mask = numpy_.tril(numpy_.ones((n_queries, n_queries), dtype=np.bool_))
@@ -309,6 +330,10 @@ def CreateAttentionMaskLayer():
 
 
 def ZeroPadding(n_positions, embedding_layer, axis=1):
+  """
+  Instead of standard zero padding this layer pads tokens with
+  trainable embeddings for zero tokens.
+  """
   def create_zero_pad(vecs):
     input_shape = np.array(vecs.shape)[:-1]  # cut embeddings
     input_shape[axis] = n_positions
