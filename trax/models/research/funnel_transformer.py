@@ -117,6 +117,13 @@ def _Upsampler(total_pool_size, separate_cls):
   return tl.Fn('Upsampler', _Upsample)
 
 
+def _UpsamplerNaive(shorten_factor):
+  def _Upsample(x):
+    return x.repeat(shorten_factor, axis=1)
+
+  return tl.Fn('UpsamplerNaive', _Upsample)
+
+
 def _UpsamplerLM(shorten_factor, d_embedding):
   return tl.Serial(
       tl.Dense(shorten_factor * d_embedding),
@@ -690,7 +697,8 @@ def FunnelTransformerLM(vocab_size,
       tl.Residual(
           tl.ShiftRight(n_positions=total_pooling_acc - 1),
           funnel_blocks,
-          _UpsamplerLM(total_pooling_acc, d_model)
+          _UpsamplerNaive(total_pooling_acc)
+          # _UpsamplerLM(total_pooling_acc, d_model)
       ),
       conv_layer,
       post_decoder_blocks,
