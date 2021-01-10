@@ -559,6 +559,7 @@ def FunnelTransformerLM(vocab_size,
                         shorten_factors=(3,),
                         n_funnel_blocks=(6,),
                         use_conv=True,
+                        separate_cls = False,
                         n_heads=8,
                         max_len=3072,
                         dropout=0.1,
@@ -610,8 +611,6 @@ def FunnelTransformerLM(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
-  total_pooling_acc = 1
-  separate_cls = False
   context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model, n_heads)
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
@@ -629,6 +628,7 @@ def FunnelTransformerLM(vocab_size,
         for _ in range(n_layers)]
     return decoder_blocks
 
+  total_pooling_acc = 1
   pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks, total_pooling_acc)
   total_shorten_factor = functools.reduce(lambda x, y: x * y, shorten_factors)
 
@@ -669,5 +669,6 @@ def FunnelTransformerLM(vocab_size,
       ),
       conv_layer,
       post_decoder_blocks,
+      tl.LayerNorm(),
       tl.Dense(vocab_size),  # vecs
   )
