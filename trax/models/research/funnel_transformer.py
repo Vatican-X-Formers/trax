@@ -667,6 +667,7 @@ def FunnelTransformerLM(vocab_size,
       tl.LayerNorm(),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
       _UpsamplerLM(total_shorten_factor, d_model),
+      tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
       post_decoder_blocks,
