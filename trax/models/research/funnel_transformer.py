@@ -661,6 +661,7 @@ def FunnelTransformerLM(vocab_size,
           ZeroPadding(n_positions=total_shorten_factor-1,
                       embedding_layer=token_encoder),
           funnel_blocks,
+          tl.LayerNorm(),
           _UpsamplerLM(total_shorten_factor, d_model)
       ),
       conv_layer,
