@@ -55,24 +55,56 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
         activations (based on query-key pairs) before dotting them with values.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
+
   return cb.Serial(
-      cb.Branch(
-          PositionalEmbeddings(d_feature, separate_cls, total_pooling),
-          cb.Select([0]),
-          cb.Select([1])
-      ),
-      cb.Parallel(
-          core.Dense(d_feature),
-          core.Dense(d_feature),
-          core.Dense(d_feature),
-          core.Dense(d_feature),
-      ),
-      context_bias_layer,
-      location_bias_layer,
-      RelativeAttention(  # pylint: disable=no-value-for-parameter
-          separate_cls=separate_cls, n_heads=n_heads,
-          dropout=dropout, mode=mode),
+    cb.Branch(
+      PositionalEmbeddings(d_feature, separate_cls, total_pooling),
+      cb.Select([0]),
+      cb.Select([1])
+    ),
+    cb.Parallel(
       core.Dense(d_feature),
+      core.Dense(d_feature),
+      core.Dense(d_feature),
+      core.Dense(d_feature),
+    ),
+    context_bias_layer,
+    location_bias_layer,
+    RelativeAttention(  # pylint: disable=no-value-for-parameter
+      separate_cls=separate_cls, n_heads=n_heads,
+      dropout=dropout, mode=mode),
+    core.Dense(d_feature),
+  )
+
+
+@assert_shape('bSq,blk,blv->bSd')
+def RelativeAttentionLMLayer(d_feature, context_bias_layer, location_bias_layer,
+                             separate_cls, total_pooling,
+                             n_heads=1, dropout=0.0, mode='train'):
+  """Returns a layer that maps (q, k, v) to (activations).
+  Same as standard Relative attention layer but additionally based on sizes
+  of keys and values prepares a mask that masks out the future.
+  This is the concept primarily used for Language Modelling.
+  Args:
+    d_feature: Depth/dimensionality of feature embedding.
+    context_bias_layer: Global context bias from Transformer XL's attention.
+    location_bias_layer: Global location bias from Transformer XL's attention.
+    separate_cls: True/False if we separate_cls in calculations.
+    total_pooling: The combined pool size of previously used funnel blocks.
+    n_heads: Number of attention heads.
+    dropout: Probabilistic rate for internal dropout applied to attention
+        activations (based on query-key pairs) before dotting them with values.
+    mode: One of `'train'`, `'eval'`, or `'predict'`.
+  """
+
+  attention = RelativeAttentionLayer(
+    d_feature, context_bias_layer, location_bias_layer, separate_cls,
+    total_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
+
+  return cb.Serial(
+    CreateAttentionMaskLayer(),  # q, k, v, mask
+    attention,  # vecs, mask
+    cb.Select([0], n_in=2),  # vecs
   )
 
 
@@ -117,25 +149,25 @@ class RelativeAttention(base.Layer):
     n_heads = self._n_heads
     if d_feature % n_heads != 0:
       raise ValueError(
-          f'Dimensionality of feature embedding ({d_feature}) is not a '
-          f'multiple of the requested number of attention heads ({n_heads}).')
+        f'Dimensionality of feature embedding ({d_feature}) is not a '
+        f'multiple of the requested number of attention heads ({n_heads}).')
 
     per_head_results, dots = DotProductAttention(
-        SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(q),
-        SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(k),
-        SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(v),
-        pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
-        context_bias,
-        location_bias,
-        mask,
-        separate_cls=self._separate_cls,
-        dropout=self._dropout,
-        mode=self._mode,
-        rng=self.rng)
+      SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(q),
+      SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(k),
+      SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(v),
+      pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
+      context_bias,
+      location_bias,
+      mask,
+      separate_cls=self._separate_cls,
+      dropout=self._dropout,
+      mode=self._mode,
+      rng=self.rng)
     if self._mode == 'viz':
       self.state = dots
     merged_results = MergeHeads(n_heads, merged_batch_and_head=False).forward(
-        per_head_results)
+      per_head_results)
     return merged_results, mask
 
 
@@ -247,6 +279,55 @@ def _fast_matrix_shift(x, shift):
   x = x.reshape(bsz, n_head, qlen, klen * 2 - 1)
   x = x[:, :, :, shift - 1: shift - 1 + klen]
   return x
+
+
+def CreateAttentionMaskLayer():
+  def calculate_mask(queries, keys):
+    batch_size = queries.shape[0]
+    n_queries, n_keys = queries.shape[-2], keys.shape[-2]
+    assert n_keys % n_queries == 0
+    shorten_factor = n_keys // n_queries
+
+    return _funnel_mask(batch_size, n_queries, shorten_factor)
+
+  def _funnel_mask(batch_size, n_queries, shorten_factor):
+    numpy_ = jnp if fastmath.is_backend(fastmath.Backend.JAX) else np
+
+    mask = numpy_.tril(numpy_.ones((n_queries, n_queries), dtype=np.bool_))
+
+    if shorten_factor != 1:
+      mask = numpy_.repeat(mask, shorten_factor, axis=-1)
+
+    return numpy_.repeat(mask[None, None, :, :], batch_size, axis=0)
+
+  return cb.Branch(
+    cb.Select([0]),
+    cb.Select([1]),
+    cb.Select([2]),
+    cb.Fn('create attention mask layer', calculate_mask, n_out=1)
+  )
+
+
+def ZeroPadding(n_positions, embedding_layer, axis=1):
+  def create_zero_pad(vecs):
+    input_shape = np.array(vecs.shape)[:-1]  # cut embeddings
+    input_shape[axis] = n_positions
+    padding = np.zeros(input_shape, dtype=np.int)
+    return padding
+
+  def cut_vecs(vecs):
+    return vecs[:, :-n_positions, :]
+
+  return cb.Serial(
+    cb.Branch(
+      cb.Serial(
+        cb.Fn('Create zero padding', create_zero_pad, n_out=1),
+        embedding_layer
+      ),
+      cb.Fn('Cut vecs', cut_vecs, n_out=1),
+    ),
+    cb.Concatenate(axis=axis)
+  ),
 
 
 @assert_shape('...d->...d')

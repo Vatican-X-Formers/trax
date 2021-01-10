@@ -27,14 +27,11 @@ from trax.layers.assert_shape import assert_shape
 from trax.models.transformer import _EncoderBlock
 from trax.models.transformer import _FeedForwardBlock
 
-from trax.layers.research.rel_attention import RelativeAttentionLayer
+from trax.layers.research.rel_attention import RelativeAttentionLayer, \
+                                ZeroPadding, RelativeAttentionLMLayer
 from trax.layers import initializers as init
-from trax.layers import core
-
-import numpy as np
 from trax.fastmath import numpy as jnp
-from trax import fastmath
-from trax.layers import combinators as cb
+from trax.layers import core
 
 
 @assert_shape('bld->bSd')
@@ -471,7 +468,7 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
     A list of layers that maps (activations, att_vecs, mask) to
                                (activations, att_vecs, mask).
   """
-  attention = RelativeAttentionLayer(
+  attention = RelativeAttentionLMLayer(
       d_model, context_bias_layer, location_bias_layer, separate_cls,
       total_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
 
@@ -485,9 +482,7 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
       tl.Residual(  # vecs
           tl.LayerNorm(),
           tl.Select([0, 0, 0]),
-          CreateMask(),
           attention,
-          tl.Select([0], n_in=2),
           dropout_,
       ),  # vecs
       tl.Residual(
@@ -533,7 +528,7 @@ def _FunnelRelativeDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
     tl.Dense(d_model)
   )
 
-  attention = RelativeAttentionLayer(
+  attention = RelativeAttentionLMLayer(
       d_model, context_bias_layer, location_bias_layer, separate_cls,
       total_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
 
@@ -548,66 +543,13 @@ def _FunnelRelativeDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
       tl.Residual(
           tl.LayerNorm(),    # h', h
           tl.Select([0, 1, 1]),  # h', h, h
-          CreateMask(),    # h', h, h, mask
-          attention,  # h', mask
-          tl.Select([0], n_in=2),
+          attention,
           dropout_,
       ),
       tl.Residual(
           feed_forward
       ),
   ]
-
-
-def CreateMask():
-  def calculate_mask(queries, keys, values):
-    batch_size = queries.shape[0]
-    n_queries, n_keys, n_values = queries.shape[-2], keys.shape[-2], \
-                                  values.shape[-2]
-    shorten_factor = n_keys // n_queries
-
-    return _funnel_mask(batch_size, n_queries, n_keys, shorten_factor)
-
-  def _funnel_mask(batch_size, n_queries, n_keys, shorten_factor):
-    numpy_ = jnp if fastmath.is_backend(fastmath.Backend.JAX) else np
-
-    mask = numpy_.tril(numpy_.ones((n_queries, n_queries), dtype=np.bool_))
-
-    if shorten_factor != 1:
-        mask = numpy_.repeat(mask, shorten_factor, axis=-1)
-        # mask = numpy_.pad(mask, ((0, 0), (0, n_keys - mask.shape[1])))
-
-    return numpy_.repeat(mask[None, None, :, :], batch_size, axis=0)
-
-  return cb.Branch(
-      cb.Select([0]),
-      cb.Select([1]),
-      cb.Select([2]),
-      cb.Fn('create mask layer', calculate_mask, n_out=1)
-  )
-
-
-def ZeroPadding(n_positions, embedding_layer, axis=1):
-  def create_zero_pad(vecs):
-    input_shape = np.array(vecs.shape)[:-1] # cut embeddings
-    input_shape[axis] = n_positions
-    padding = np.zeros(input_shape, dtype=np.int)
-    return padding
-
-  def cut_vecs(vecs):
-    return vecs[:, :-n_positions, :]
-
-  return tl.Serial(
-          cb.Branch(
-            tl.Serial(
-              cb.Fn('Create zero padding', create_zero_pad, n_out=1),
-              embedding_layer
-            ),
-            cb.Fn('Cut vecs', cut_vecs, n_out=1),
-          ),
-          tl.Concatenate(axis=axis)
-        ),
-
 
 
 def FunnelTransformerLM(vocab_size,
