@@ -537,8 +537,11 @@ def _FunnelRelativeDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
 
   return [
       tl.Branch(pooling, None),  # h', h
+      tl.Parallel(
+        tl.LayerNorm(),
+        tl.LayerNorm()
+      ),
       tl.Residual(
-          tl.LayerNorm(),    # h', h
           tl.Select([0, 1, 1]),  # h', h, h
           attention,
           dropout_,
