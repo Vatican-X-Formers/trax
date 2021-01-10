@@ -707,7 +707,7 @@ def FunnelTransformerLM(vocab_size,
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_shorten_factor),
-      tl.Relu()
+      ff_activation()
   ) if use_conv else []
 
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
