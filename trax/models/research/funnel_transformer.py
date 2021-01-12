@@ -602,10 +602,10 @@ def FunnelTransformerLM(vocab_size,
       # tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
-      tl.Residual(
-        tl.LayerNorm(),
-        funnel_upsampler,  # TODO: layernorm?
-        tl.LayerNorm(),
-      ),
+      # tl.Residual(
+      #   tl.LayerNorm(),
+      #   funnel_upsampler,  # TODO: layernorm?
+      #   tl.LayerNorm(),
+      # ),
       tl.Dense(vocab_size)
   )
