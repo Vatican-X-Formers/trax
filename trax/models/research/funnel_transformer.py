@@ -596,12 +596,13 @@ def FunnelTransformerLM(vocab_size,
       tl.Dup(),
       tl.ShiftRight(n_positions=total_shorten_factor - 1),
       funnel_blocks,
-      tl.Select([0, 1, 0]),
+      # tl.Select([0, 1, 0]),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
       _UpsamplerLM(total_shorten_factor, d_model),
       # tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
+      # tl.PrintShape(2),
       # tl.Residual(
       #   tl.LayerNorm(),
       #   funnel_upsampler,  # TODO: layernorm?
