@@ -448,8 +448,11 @@ def _FunnelDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
-  pooling = PoolLayer(tl.AvgPool, pool_size=(shorten_factor,),
-                      strides=(shorten_factor,), separate_cls=False)
+  pooling = tl.Serial(
+      tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
+          x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
+      tl.Dense(d_model)
+  )
 
   causal_attention = FunnelCausalAttention(
       shorten_factor, d_model, n_heads=n_heads, dropout=dropout, mode=mode)
@@ -581,11 +584,6 @@ def FunnelTransformerLM(vocab_size,
       mode, ff_activation
   )
 
-  dense_join = tl.Serial(
-      tl.Dense(d_model),
-      ff_activation()
-  )
-
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_shorten_factor),
       ff_activation()
@@ -599,9 +597,10 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(n_positions=total_shorten_factor - 1),
       funnel_blocks,
       tl.Select([0, 1, 0]),
+      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
       _UpsamplerLM(total_shorten_factor, d_model),
       # tl.LayerNorm(),
-      tl.Add(),
+      tl.Concatenate(),
       conv_layer,
       tl.Residual(
         tl.LayerNorm(),
