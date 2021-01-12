@@ -572,6 +572,10 @@ def FunnelTransformerLM(vocab_size,
 
   total_shorten_factor = functools.reduce(lambda x, y: x * y, shorten_factors)
 
+  n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
+  pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks)
+  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks)
+
   funnel_blocks = [[_FunnelDecoderBlock(
       shorten_factor, d_model, d_ff, n_heads, dropout, dropout_shared_axes,
       mode, ff_activation
@@ -584,28 +588,20 @@ def FunnelTransformerLM(vocab_size,
       mode, ff_activation
   )
 
-  conv_layer = tl.Serial(
-      tl.CausalConv(d_model, total_shorten_factor),
-      ff_activation()
-  )
-
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       positional_encoder,  # vecs
+      pre_decoder_blocks,
       tl.Dup(),
       tl.ShiftRight(n_positions=total_shorten_factor - 1),
       funnel_blocks,
-      tl.Select([0, 1, 0]),
-      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
-      _UpsamplerLM(total_shorten_factor, d_model),
-      # tl.LayerNorm(),
-      tl.Concatenate(),
-      conv_layer,
+      tl.Select([1, 0]),
       tl.Residual(
-        tl.LayerNorm(),
-        funnel_upsampler,  # TODO: layernorm?
-        tl.LayerNorm(),
+          tl.LayerNorm(),
+          funnel_upsampler,  # TODO: layernorm?
+          tl.LayerNorm(),
       ),
+      post_decoder_blocks,
       tl.Dense(vocab_size)
   )
