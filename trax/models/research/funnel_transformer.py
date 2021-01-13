@@ -709,7 +709,8 @@ def _UFunnelValley(d_model,
                    dropout_shared_axes,
                    mode,
                    ff_activation,
-                   shorten_factor):
+                   shorten_factor,
+                   total_sf):
     n = len(segment_lengths)
     assert n
 
@@ -720,7 +721,7 @@ def _UFunnelValley(d_model,
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                             dropout_shared_axes, mode, ff_activation,
                             False, context_bias_layer,
-                            location_bias_layer, shorten_factor)
+                            location_bias_layer, total_sf)
         for _ in range(current_len)]
 
     if n == 1:
@@ -730,7 +731,7 @@ def _UFunnelValley(d_model,
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                             dropout_shared_axes, mode, ff_activation,
                             False, context_bias_layer,
-                            location_bias_layer, shorten_factor)
+                            location_bias_layer, total_sf)
         for _ in range(current_len)]
 
     funnel_block = _FunnelRelativeDecoderBlock(
@@ -740,7 +741,7 @@ def _UFunnelValley(d_model,
         separate_cls=False,
         context_bias_layer=context_bias_layer,
         location_bias_layer=location_bias_layer,
-        total_pooling=shorten_factor)
+        total_pooling=total_sf)
 
     funnel_upsampler = _UpsamplerLM(shorten_factor, d_model)
 
@@ -752,7 +753,7 @@ def _UFunnelValley(d_model,
             funnel_block,
             *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
                             n_heads, dropout, dropout_shared_axes,
-                            mode, ff_activation, 2),
+                            mode, ff_activation, 2, total_sf*shorten_factor),
             funnel_upsampler,
         ),
         post_decoder_blocks
@@ -792,7 +793,7 @@ def UFunnel(vocab_size,
         positional_encoder,  # vecs
         _UFunnelValley(d_model, d_ff, segment_lengths,
                        n_heads, dropout, dropout_shared_axes,
-                       mode, ff_activation, shorten_factor),
+                       mode, ff_activation, shorten_factor, 1),
         tl.LayerNorm(),  # vecs
         conv_layer,
         tl.Dense(vocab_size),  # vecs
