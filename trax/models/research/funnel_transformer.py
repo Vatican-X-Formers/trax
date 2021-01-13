@@ -449,9 +449,12 @@ def _FunnelDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
     A list of layers that maps an activation tensor to an activation tensor.
   """
   pooling = tl.Serial(
-      tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
-          x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
-      tl.Dense(d_model)
+      # tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
+      #     x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
+      # tl.Dense(d_model),
+      tl.Conv1d(d_model, kernel_size=shorten_factor, stride=shorten_factor),
+      tl.BatchNorm(axis=(0, 1)),
+      tl.Relu()
   )
 
   causal_attention = FunnelCausalAttention(
