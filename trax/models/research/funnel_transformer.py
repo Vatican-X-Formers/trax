@@ -454,7 +454,6 @@ def _FunnelDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
       # tl.Dense(d_model),
       tl.Conv1d(d_model, kernel_size=shorten_factor, stride=shorten_factor),
       tl.BatchNorm(axis=(0, 1)),
-      tl.Relu()
   )
 
   causal_attention = FunnelCausalAttention(
