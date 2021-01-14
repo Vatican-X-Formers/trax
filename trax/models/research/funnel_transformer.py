@@ -682,7 +682,7 @@ def FunnelTransformerLM(vocab_size,
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, shorten_factors[0]),
-      # tl.BatchNorm(axis=(0, 1)),
+      tl.BatchNorm(axis=(0, 1)),
       ff_activation()
   ) if use_conv else []
 
@@ -696,7 +696,7 @@ def FunnelTransformerLM(vocab_size,
       funnel_blocks,
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
       _UpsamplerLM(total_pooling_acc, d_model),
-      tl.LayerNorm(),
+      # tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
       post_decoder_blocks,
