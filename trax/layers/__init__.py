@@ -50,6 +50,7 @@ def layer_configure(*args, **kwargs):
 Relu = layer_configure(Relu)
 Gelu = layer_configure(Gelu)
 FastGelu = layer_configure(FastGelu)
+Swish = layer_configure(Swish)
 Sigmoid = layer_configure(Sigmoid)
 Tanh = layer_configure(Tanh)
 HardSigmoid = layer_configure(HardSigmoid)
