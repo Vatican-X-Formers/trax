@@ -660,11 +660,11 @@ def FunnelTransformerLM(vocab_size,
         for _ in range(n_layers)]
     ln = tl.LayerNorm()
     return decoder_blocks + [ln]
-
+  full_polling = functools.reduce(lambda x, acc: x*acc, shorten_factors)
   pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
                                              total_pooling_acc)
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
-                                              total_pooling_acc)
+                                              full_polling)
 
   funnel_blocks = []
 
