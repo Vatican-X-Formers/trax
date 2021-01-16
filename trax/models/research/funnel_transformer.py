@@ -491,9 +491,12 @@ def _FunnelUpsamplingDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Select([0, 1, 1]),  # h, h', h', h
-      causal_attention,
-      dropout_,
+      tl.Residual(
+          tl.LayerNorm(),
+          tl.Select([0, 1, 1]),  # h, h', h', h
+          causal_attention,
+          dropout_,
+      ),
       tl.Residual(
           feed_forward
       ),
@@ -603,10 +606,7 @@ def FunnelTransformerLM(vocab_size,
       tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
-      tl.Residual(
-        tl.LayerNorm(),
-        funnel_upsampler,  # TODO: layernorm?
-        tl.LayerNorm(),
-      ),
+      funnel_upsampler,
+      tl.LayerNorm(),
       tl.Dense(vocab_size)
   )
