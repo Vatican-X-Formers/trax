@@ -452,7 +452,6 @@ def _FunnelDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
       tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
           x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
       tl.Dense(d_model),
-      tl.LayerNorm()
   )
 
   causal_attention = FunnelCausalAttention(
@@ -601,7 +600,7 @@ def FunnelTransformerLM(vocab_size,
       tl.Select([0, 1, 0]),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
       _UpsamplerLM(total_shorten_factor, d_model),
-      # tl.LayerNorm(),
+      tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
       tl.Residual(
