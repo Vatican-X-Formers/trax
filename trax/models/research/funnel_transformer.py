@@ -779,8 +779,11 @@ def UFunnel(vocab_size,
 
     positional_encoder = [
         tl.Embedding(vocab_size, d_model),
-        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
-        #tl.PositionalEncoding(max_len=max_len, mode=mode)] # TODO: wyjebac
+        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode,
+        tl.PositionalEncoding(max_len=max_len, mode=mode)]
+        
+        
+        #tl.PositionalEncoding(max_len=max_len, mode=mode)] # TODO: usunac
 
     conv_layer = tl.Serial(
         tl.CausalConv(d_model, shorten_factor),
