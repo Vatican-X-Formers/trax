@@ -745,6 +745,7 @@ def _UFunnelValley(d_model,
 
     funnel_upsampler = _UpsamplerLM(shorten_factor, d_model)
 
+    # XXXX > XXX > XXX < YYYY
 
     return [
         pre_decoder_blocks,
@@ -755,6 +756,8 @@ def _UFunnelValley(d_model,
                             n_heads, dropout, dropout_shared_axes,
                             mode, ff_activation, 2, total_sf*shorten_factor),
             funnel_upsampler,
+            # TODO: exp: casual conv
+            # fix autoregresji
         ),
         post_decoder_blocks
     ]
@@ -776,13 +779,19 @@ def UFunnel(vocab_size,
 
     positional_encoder = [
         tl.Embedding(vocab_size, d_model),
-        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
-        tl.PositionalEncoding(max_len=max_len, mode=mode)]
+        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
+        #tl.PositionalEncoding(max_len=max_len, mode=mode)] # TODO: wyjebac
 
     conv_layer = tl.Serial(
         tl.CausalConv(d_model, shorten_factor),
         tl.Relu()
     ) if use_conv else None
+    # TODO: exp: wyjebac conva
+    # TODO: exp: asymetrycznosc?
+    # TODO: exp: asymetrycznosc bez predecoderblockow
+    # TODO: exp: syzymon funnelsampling
+    # TODO: kierunek: wyjebanie pre i post -> cel: szybkosc dzialania n^2/k
+    # TODO: d_model poglebanie stopniowe 256, 512, ... (addytywne lub multiplikatywne)
 
     _channels = 1
     #merge_layer = tl.Conv1d(kernel_size=_channels, stride=3, padding='VALID', filters=d_model)
