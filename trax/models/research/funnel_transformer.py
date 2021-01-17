@@ -779,7 +779,7 @@ def UFunnel(vocab_size,
 
     positional_encoder = [
         tl.Embedding(vocab_size, d_model),
-        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode,
+        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
         tl.PositionalEncoding(max_len=max_len, mode=mode)]
         
         
@@ -788,7 +788,7 @@ def UFunnel(vocab_size,
     conv_layer = tl.Serial(
         tl.CausalConv(d_model, shorten_factor),
         tl.Relu()
-    ) if use_conv else None
+    )
     # TODO: exp: wyjebac conva
     # TODO: exp: asymetrycznosc?
     # TODO: exp: asymetrycznosc bez predecoderblockow
@@ -807,7 +807,6 @@ def UFunnel(vocab_size,
                        n_heads, dropout, dropout_shared_axes,
                        mode, ff_activation, shorten_factor, 1),
         tl.LayerNorm(),  # vecs
-        conv_layer,
         tl.Dense(vocab_size),  # vecs
         tl.LogSoftmax(),  # vecs
     )
