@@ -746,7 +746,10 @@ def _UFunnelValley(d_model,
     funnel_upsampler = _UpsamplerLM(shorten_factor, d_model)
 
     # XXXX > XXX > XXX < YYYY
-
+    conv_layer = tl.Serial(
+        tl.CausalConv(d_model, shorten_factor),
+        tl.Relu()
+    )
     return [
         pre_decoder_blocks,
         tl.Residual(
@@ -756,7 +759,7 @@ def _UFunnelValley(d_model,
                             n_heads, dropout, dropout_shared_axes,
                             mode, ff_activation, 2, total_sf*shorten_factor),
             funnel_upsampler,
-            # TODO: exp: casual conv
+            conv_layer
             # fix autoregresji
         ),
         post_decoder_blocks
@@ -779,16 +782,11 @@ def UFunnel(vocab_size,
 
     positional_encoder = [
         tl.Embedding(vocab_size, d_model),
-        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode,
-        tl.PositionalEncoding(max_len=max_len, mode=mode)]
+        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
         
         
         #tl.PositionalEncoding(max_len=max_len, mode=mode)] # TODO: usunac
 
-    conv_layer = tl.Serial(
-        tl.CausalConv(d_model, shorten_factor),
-        tl.Relu()
-    ) if use_conv else None
     # TODO: exp: wyjebac conva
     # TODO: exp: asymetrycznosc?
     # TODO: exp: asymetrycznosc bez predecoderblockow
@@ -807,7 +805,6 @@ def UFunnel(vocab_size,
                        n_heads, dropout, dropout_shared_axes,
                        mode, ff_activation, shorten_factor, 1),
         tl.LayerNorm(),  # vecs
-        conv_layer,
         tl.Dense(vocab_size),  # vecs
         tl.LogSoftmax(),  # vecs
     )
