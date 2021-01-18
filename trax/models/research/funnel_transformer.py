@@ -758,9 +758,7 @@ def _UFunnelValley(d_model,
             *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
                             n_heads, dropout, dropout_shared_axes,
                             mode, ff_activation, 2, total_sf*shorten_factor),
-            funnel_upsampler,
-            conv_layer
-            # fix autoregresji
+            funnel_upsampler
         ),
         post_decoder_blocks
     ]
