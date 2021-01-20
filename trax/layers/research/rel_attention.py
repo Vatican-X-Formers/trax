@@ -40,16 +40,20 @@ from trax.layers.attention import SplitIntoHeads, MergeHeads
 
 @assert_shape('bSq,blk,blv,b1xl->bSd,b1xl')
 def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
-                           separate_cls, total_pooling,
+                           separate_cls, total_kv_pooling,
                            n_heads=1, dropout=0.0, mode='train'):
-  """Returns a layer that maps (q, k, v, mask) to (activations, mask).
-  See Transformer XL paper for further context/details.
+  """Returns a layer that maps (q, k, v) to (activations).
+  Same as standard Relative attention layer but additionally based on sizes
+  of keys and values prepares a mask that masks out the future.
+  This is the concept primarily used for Language Modelling.
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     context_bias_layer: Global context bias from Transformer XL's attention.
+      !!! There should be one such layer shared for all relative attention layers.
     location_bias_layer: Global location bias from Transformer XL's attention.
+      !!! There should be one such layer shared for all relative attention layers.
     separate_cls: True/False if we separate_cls in calculations.
-    total_pooling: The combined pool size of previously used funnel blocks.
+    total_kv_pooling: Accumulated pool size of keys/values used at this layer
     n_heads: Number of attention heads.
     dropout: Probabilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
@@ -58,7 +62,7 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
 
   return cb.Serial(
     cb.Branch(
-      PositionalEmbeddings(d_feature, separate_cls, total_pooling),
+      PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
       cb.Select([0]),
       cb.Select([1])
     ),
@@ -79,18 +83,20 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
 
 @assert_shape('bSq,blk,blv->bSd')
 def RelativeAttentionLMLayer(d_feature, context_bias_layer, location_bias_layer,
-                             separate_cls, total_pooling,
+                             separate_cls, total_kv_pooling,
                              n_heads=1, dropout=0.0, mode='train'):
   """Returns a layer that maps (q, k, v) to (activations).
   Same as standard Relative attention layer but additionally based on sizes
-  of keys and values prepares a mask that masks out the future.
-  This is the concept primarily used for Language Modelling.
+  of queries and keys prepares a mask that masks out the future.
+  Masking the future is the concept primarily used for Language Modelling.
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     context_bias_layer: Global context bias from Transformer XL's attention.
+      !!! There should be one such layer shared for all relative attention layers.
     location_bias_layer: Global location bias from Transformer XL's attention.
+      !!! There should be one such layer shared for all relative attention layers.
     separate_cls: True/False if we separate_cls in calculations.
-    total_pooling: The combined pool size of previously used funnel blocks.
+    total_kv_pooling: Accumulated pool size of keys/values used at this layer
     n_heads: Number of attention heads.
     dropout: Probabilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
@@ -99,7 +105,7 @@ def RelativeAttentionLMLayer(d_feature, context_bias_layer, location_bias_layer,
 
   attention = RelativeAttentionLayer(
     d_feature, context_bias_layer, location_bias_layer, separate_cls,
-    total_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
+    total_kv_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
 
   return cb.Serial(
     CreateAttentionMaskLayer(),  # q, k, v, mask
