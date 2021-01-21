@@ -344,9 +344,11 @@ def CreateAttentionMaskLayer():
     keys_len, queries_len = keys.shape[-2], queries.shape[-2]
     funnel_factor, upsampling = calc_funnel_ratio(keys_len, queries_len)
 
-    return _funnel_mask(batch_size, queries_len, funnel_factor, upsampling)
+    return _funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
+                        upsampling)
 
-  def _funnel_mask(batch_size, n_queries, funnel_factor, upsampling=False):
+  def _funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
+                   upsampling=False):
     """
     Given function based on shorten factor argument creates a triangle
     mask that prevents tokens from attending to positions following it.
@@ -360,13 +362,18 @@ def CreateAttentionMaskLayer():
     """
     numpy_ = jnp if fastmath.is_backend(fastmath.Backend.JAX) else np
 
-    mask = numpy_.tril(numpy_.ones((n_queries, n_queries), dtype=np.bool_))
-
     if funnel_factor != 1:
       if upsampling is False:
+        mask = numpy_.tril(numpy_.ones((queries_len, queries_len),
+                                       dtype=np.bool_))
         mask = numpy_.repeat(mask, funnel_factor, axis=-1)
       else:
+        mask = numpy_.tril(numpy_.ones((keys_len, keys_len),
+                                       dtype=np.bool_))
         mask = numpy_.repeat(mask, funnel_factor, axis=-2)
+    else:
+      mask = numpy_.tril(numpy_.ones((queries_len, queries_len),
+                                     dtype=np.bool_))
 
     return numpy_.repeat(mask[None, None, :, :], batch_size, axis=0)
 
