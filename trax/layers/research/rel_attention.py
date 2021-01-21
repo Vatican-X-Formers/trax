@@ -212,11 +212,21 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
       sum of per-head values.
     """
   d_feature = queries.shape[-1]
-  funnels_shift = keys.shape[-2] // queries.shape[-2]
+  keys_len, queries_len = keys.shape[-2], queries.shape[-2]
+
+  # Upsampling
+  if queries_len > keys_len:
+    assert queries_len % keys_len == 0
+    shift_interval_ratio = queries_len // keys_len
+    upsampling = True
+  else:
+    assert keys_len % queries_len == 0
+    shift_interval_ratio = keys_len // queries_len
+    upsampling = False
 
   ac = jnp.einsum('bnid,bnjd->bnij', queries + context_bias, keys)
   bd = jnp.einsum('bnid,jnd->bnij', queries + location_bias, pos_emb)
-  bd = _fast_matrix_shift(bd, shift=funnels_shift)
+  bd = _fast_matrix_shift(bd, shift_interval_ratio, upsampling=upsampling)
 
   if separate_cls:
     # Masking out location part of attention for cls token
@@ -251,8 +261,16 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
 
   def CalculatePositionalEmbeddings(queries, keys):
     is_funnel_layer = queries.shape != keys.shape
-    keys_len = keys.shape[1]
-    positions = np.arange(-keys_len + 1, keys_len, 1.0) * total_pooling
+    keys_len, queries_len = keys.shape[1], queries.shape[1]
+    current_pooling_ratio = keys_len // queries_len
+
+    # Special case of upsampling
+    if is_funnel_layer and current_pooling_ratio < 1:
+      assert separate_cls is False  # TODO
+      positions = np.arange(-queries_len + 1, queries_len, 1.0) * \
+                  (total_pooling * current_pooling_ratio)
+    else:
+      positions = np.arange(-keys_len + 1, keys_len, 1.0) * total_pooling
 
     if is_funnel_layer and separate_cls:
       # For pool_size 2 without separating cls we have got
@@ -263,8 +281,7 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
       # First group always will always consist of one token after pooling
       # instead of (pool_size) tokens. We need to add proper offset so
       # that our shift later on in calculating attention works properly
-      single_pooling_ratio = keys.shape[1] // queries.shape[1]
-      cls_offset = (single_pooling_ratio - 1) * total_pooling
+      cls_offset = (current_pooling_ratio - 1) * total_pooling
       positions = positions + cls_offset
 
     return encode_sequence(positions)
@@ -280,9 +297,16 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
                n_out=1)
 
 
-def _fast_matrix_shift(x, shift):
+def _fast_matrix_shift(x, shift_interval_ratio, upsampling=False):
   # This function shifts i-th row by i * shift elements to the left.
   # It implements necessary shift for relative positional attention calculation.
+
+  if upsampling is True:
+    interval = shift_interval_ratio
+    shift = 1
+  else:
+    interval = 1
+    shift = shift_interval_ratio
 
   bsz, n_head = x.shape[0], x.shape[1]
   qlen, klen = x.shape[2], (x.shape[3] + 1) // 2
@@ -292,7 +316,7 @@ def _fast_matrix_shift(x, shift):
   x = x.reshape(bsz, n_head, 2 * klen - 1 + shift, qlen)
   x = x[:, :, shift:, :]
   x = x.reshape(bsz, n_head, qlen, klen * 2 - 1)
-  x = x[:, :, :, shift - 1: shift - 1 + klen]
+  x = x[:, :, :, shift - 1: shift - 1 + klen: interval]
   return x
 
 
