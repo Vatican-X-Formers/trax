@@ -42,7 +42,7 @@ from trax.layers.attention import SplitIntoHeads, MergeHeads
 def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
                            separate_cls, total_kv_pooling,
                            n_heads=1, dropout=0.0, mode='train'):
-  """Returns a layer that maps (q, k, v) to (activations).
+  """Returns a layer that maps (q, k, v, masks) to (activations, masks).
   For number of keys being smaller than number of queries layer works in O(q^2*d).
   Otherwise it is O(q*k*d). That is because we need to shift relative distances
   by a fraction of 1 / current_upsampling_rate.
@@ -320,10 +320,13 @@ def _fast_matrix_shift(x, shift_interval_ratio, upsampling=False):
   return x
 
 
+@assert_shape('bqd,bkd,bvd->bqd,bkd,bvd,b1qk')
 def CreateAttentionMaskLayer():
   """Returns a layer that based of queries and keys and a combined pool size
      before in the funnel transformer computes positional embeddings for
      causal relative attention calculations.
+
+     Takes q, k, v and appends proper mask in the end.
 
      Causal attention uses masking to prevent a given sequence position from
      attending to positions greater than / following it. This is used, for
@@ -373,6 +376,7 @@ def ZeroPadding(n_positions, embedding_layer, axis=1):
   Instead of standard zero padding this layer pads tokens with
   trainable embeddings for zero tokens.
   """
+
   def create_zero_pad(vecs):
     input_shape = np.array(vecs.shape)[:-1]  # cut embeddings
     input_shape[axis] = n_positions
