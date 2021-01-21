@@ -741,6 +741,7 @@ def _UFunnelValley(d_model,
     return [
         pre_decoder_blocks,
         tl.Residual(
+            tl.LayerNorm(),
             tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
             funnel_block,
             *_UFunnelValley(d_model, d_ff, segment_lengths[1:],
