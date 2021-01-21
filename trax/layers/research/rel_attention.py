@@ -213,20 +213,11 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     """
   d_feature = queries.shape[-1]
   keys_len, queries_len = keys.shape[-2], queries.shape[-2]
-
-  # Upsampling
-  if queries_len > keys_len:
-    assert queries_len % keys_len == 0
-    shift_interval_ratio = queries_len // keys_len
-    upsampling = True
-  else:
-    assert keys_len % queries_len == 0
-    shift_interval_ratio = keys_len // queries_len
-    upsampling = False
+  funnel_factor, upsampling = calc_funnel_ratio(keys_len, queries_len)
 
   ac = jnp.einsum('bnid,bnjd->bnij', queries + context_bias, keys)
   bd = jnp.einsum('bnid,jnd->bnij', queries + location_bias, pos_emb)
-  bd = _fast_matrix_shift(bd, shift_interval_ratio, upsampling=upsampling)
+  bd = _fast_matrix_shift(bd, funnel_factor, upsampling=upsampling)
 
   if separate_cls:
     # Masking out location part of attention for cls token
@@ -297,16 +288,30 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
                n_out=1)
 
 
-def _fast_matrix_shift(x, shift_interval_ratio, upsampling=False):
+def calc_funnel_ratio(keys_len, queries_len):
+  # Upsampling
+  if queries_len > keys_len:
+    assert queries_len % keys_len == 0
+    funnel_factor = queries_len // keys_len
+    upsampling = True
+  else:
+    assert keys_len % queries_len == 0
+    funnel_factor = keys_len // queries_len
+    upsampling = False
+
+  return funnel_factor, upsampling
+
+
+def _fast_matrix_shift(x, funnel_factor, upsampling=False):
   # This function shifts i-th row by i * shift elements to the left.
   # It implements necessary shift for relative positional attention calculation.
 
   if upsampling is True:
-    interval = shift_interval_ratio
+    interval = funnel_factor
     shift = 1
   else:
     interval = 1
-    shift = shift_interval_ratio
+    shift = funnel_factor
 
   bsz, n_head = x.shape[0], x.shape[1]
   qlen, klen = x.shape[2], (x.shape[3] + 1) // 2
@@ -336,30 +341,32 @@ def CreateAttentionMaskLayer():
 
   def calculate_mask(queries, keys):
     batch_size = queries.shape[0]
-    n_queries, n_keys = queries.shape[-2], keys.shape[-2]
-    assert n_keys % n_queries == 0
-    shorten_factor = n_keys // n_queries
+    keys_len, queries_len = keys.shape[-2], queries.shape[-2]
+    funnel_factor, upsampling = calc_funnel_ratio(keys_len, queries_len)
 
-    return _funnel_mask(batch_size, n_queries, shorten_factor)
+    return _funnel_mask(batch_size, queries_len, funnel_factor, upsampling)
 
-  def _funnel_mask(batch_size, n_queries, shorten_factor):
+  def _funnel_mask(batch_size, n_queries, funnel_factor, upsampling=False):
     """
     Given function based on shorten factor argument creates a triangle
     mask that prevents tokens from attending to positions following it.
 
-    If shorten factor is not equal to 1 due to funnel downsampling it
-    adjusts created mask for funnel layer attention by repeating each
-    element shorten_factor times.
+    If funnel_factor is not equal to 1 due to funnel downsampling or
+    downsampling it adjusts created mask for funnel attention
+    by repeating each element funnel_factor times.
 
-    This is because after funnel layer one token attends to shorten_factor
+    This is because after funnel layer one token attends to funnel_factor
     different embeddings.
     """
     numpy_ = jnp if fastmath.is_backend(fastmath.Backend.JAX) else np
 
     mask = numpy_.tril(numpy_.ones((n_queries, n_queries), dtype=np.bool_))
 
-    if shorten_factor != 1:
-      mask = numpy_.repeat(mask, shorten_factor, axis=-1)
+    if funnel_factor != 1:
+      if upsampling is False:
+        mask = numpy_.repeat(mask, funnel_factor, axis=-1)
+      else:
+        mask = numpy_.repeat(mask, funnel_factor, axis=-2)
 
     return numpy_.repeat(mask[None, None, :, :], batch_size, axis=0)
 
