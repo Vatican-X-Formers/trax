@@ -43,9 +43,18 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
                            separate_cls, total_kv_pooling,
                            n_heads=1, dropout=0.0, mode='train'):
   """Returns a layer that maps (q, k, v) to (activations).
-  Same as standard Relative attention layer but additionally based on sizes
-  of keys and values prepares a mask that masks out the future.
-  This is the concept primarily used for Language Modelling.
+  For number of keys being smaller than number of queries layer works in O(q^2*d).
+  Otherwise it is O(q*k*d). That is because we need to shift relative distances
+  by a fraction of 1 / current_upsampling_rate.
+  Visual explanation:
+  [01][23][45][67] -> [0][1][2][3][4][5][6][7]
+  For token [0] we calculate relative distances as follows:
+  * 0 2 4 6
+  However for token [1] we need relative distances changed by 1, more specifically:
+  * -1 1 3 5
+  So we not only need calculate the distances that corresponds to spacing between
+  the keys but also for the ones in between because there are more than one query
+  tokens for single key token.
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     context_bias_layer: Global context bias from Transformer XL's attention.
