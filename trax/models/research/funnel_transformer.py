@@ -634,11 +634,13 @@ def FunnelTransformerLM(vocab_size,
                               separate_cls, context_bias_layer,
                               location_bias_layer, total_pooling)
         for _ in range(n_layers)]
-    return decoder_blocks
+    ln = tl.LayerNorm()
+    return decoder_blocks + [ln]
 
   total_pooling_acc = 1
   pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
                                              total_pooling_acc)
+  
   total_shorten_factor = functools.reduce(lambda x, y: x * y, shorten_factors)
 
   funnel_blocks = []
@@ -668,8 +670,8 @@ def FunnelTransformerLM(vocab_size,
       upsampling=True)
 
   conv_layer = tl.Serial(
-      tl.LayerNorm(),
-      tl.CausalConv(d_model, total_shorten_factor),
+      tl.CausalConv(d_model, shorten_factors[0]),
+      tl.BatchNorm(axis=(0, 1)),
       ff_activation()
   ) if use_conv else []
 
@@ -680,13 +682,13 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,  # vecs
       pre_decoder_blocks,  # vecs
-      tl.Residual(
-          ZeroPadding(n_positions=total_shorten_factor - 1,
-                      embedding_layer=token_encoder),
-          funnel_blocks,
-          tl.LayerNorm(),
-          upsampling_layer,
-      ),
+      tl.Dup(),
+      tl.ShiftRight(n_positions=total_pooling_acc - 1),
+      funnel_blocks,
+      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
+      _UpsamplerLM(total_pooling_acc, d_model),
+      tl.LayerNorm(),
+      tl.Concatenate(),
       conv_layer,
       post_decoder_blocks,
       tl.LayerNorm(),
