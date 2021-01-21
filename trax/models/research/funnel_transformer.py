@@ -736,7 +736,15 @@ def _UFunnelValley(d_model,
         location_bias_layer=location_bias_layer,
         total_pooling=total_sf)
 
-    funnel_upsampler = _UpsamplerLM(shorten_factor, d_model)
+    funnel_upsampler = _FunnelRelativeDecoderBlock(
+        shorten_factor, d_model, d_ff, n_heads, dropout,
+        dropout_shared_axes, mode,
+        ff_activation,
+        separate_cls=False,
+        context_bias_layer=context_bias_layer,
+        location_bias_layer=location_bias_layer,
+        total_pooling=total_sf*shorten_factor,
+        upsampling=True)
 
     return [
         pre_decoder_blocks,
