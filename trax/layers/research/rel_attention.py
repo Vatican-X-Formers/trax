@@ -70,23 +70,23 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
   """
 
   return cb.Serial(
-    cb.Branch(
-      PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
-      cb.Select([0]),
-      cb.Select([1])
-    ),
-    cb.Parallel(
+      cb.Branch(
+          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
+          cb.Select([0]),
+          cb.Select([1])
+      ),
+      cb.Parallel(
+          core.Dense(d_feature),
+          core.Dense(d_feature),
+          core.Dense(d_feature),
+          core.Dense(d_feature),
+      ),
+      context_bias_layer,
+      location_bias_layer,
+      RelativeAttention(  # pylint: disable=no-value-for-parameter
+          separate_cls=separate_cls, n_heads=n_heads,
+          dropout=dropout, mode=mode),
       core.Dense(d_feature),
-      core.Dense(d_feature),
-      core.Dense(d_feature),
-      core.Dense(d_feature),
-    ),
-    context_bias_layer,
-    location_bias_layer,
-    RelativeAttention(  # pylint: disable=no-value-for-parameter
-      separate_cls=separate_cls, n_heads=n_heads,
-      dropout=dropout, mode=mode),
-    core.Dense(d_feature),
   )
 
 
@@ -113,13 +113,13 @@ def RelativeAttentionLMLayer(d_feature, context_bias_layer, location_bias_layer,
   """
 
   attention = RelativeAttentionLayer(
-    d_feature, context_bias_layer, location_bias_layer, separate_cls,
-    total_kv_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
+      d_feature, context_bias_layer, location_bias_layer, separate_cls,
+      total_kv_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
 
   return cb.Serial(
-    CreateAttentionMaskLayer(),  # q, k, v, mask
-    attention,  # vecs, mask
-    cb.Select([0], n_in=2),  # vecs
+      CreateAttentionMaskLayer(),  # q, k, v, mask
+      attention,  # vecs, mask
+      cb.Select([0], n_in=2),  # vecs
   )
 
 
@@ -164,25 +164,25 @@ class RelativeAttention(base.Layer):
     n_heads = self._n_heads
     if d_feature % n_heads != 0:
       raise ValueError(
-        f'Dimensionality of feature embedding ({d_feature}) is not a '
-        f'multiple of the requested number of attention heads ({n_heads}).')
+          f'Dimensionality of feature embedding ({d_feature}) is not a '
+          f'multiple of the requested number of attention heads ({n_heads}).')
 
     per_head_results, dots = DotProductAttention(
-      SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(q),
-      SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(k),
-      SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(v),
-      pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
-      context_bias,
-      location_bias,
-      mask,
-      separate_cls=self._separate_cls,
-      dropout=self._dropout,
-      mode=self._mode,
-      rng=self.rng)
+        SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(q),
+        SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(k),
+        SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(v),
+        pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
+        context_bias,
+        location_bias,
+        mask,
+        separate_cls=self._separate_cls,
+        dropout=self._dropout,
+        mode=self._mode,
+        rng=self.rng)
     if self._mode == 'viz':
       self.state = dots
     merged_results = MergeHeads(n_heads, merged_batch_and_head=False).forward(
-      per_head_results)
+        per_head_results)
     return merged_results, mask
 
 
@@ -378,10 +378,10 @@ def CreateAttentionMaskLayer():
     return numpy_.repeat(mask[None, None, :, :], batch_size, axis=0)
 
   return cb.Branch(
-    cb.Select([0]),
-    cb.Select([1]),
-    cb.Select([2]),
-    cb.Fn('create attention mask layer', calculate_mask, n_out=1)
+      cb.Select([0]),
+      cb.Select([1]),
+      cb.Select([2]),
+      cb.Fn('create attention mask layer', calculate_mask, n_out=1)
   )
 
 
@@ -401,14 +401,14 @@ def ZeroPadding(n_positions, embedding_layer, axis=1):
     return vecs[:, :-n_positions, :]
 
   return cb.Serial(
-    cb.Branch(
-      cb.Serial(
-        cb.Fn('Create zero padding', create_zero_pad, n_out=1),
-        embedding_layer
+      cb.Branch(
+          cb.Serial(
+              cb.Fn('Create zero padding', create_zero_pad, n_out=1),
+              embedding_layer
+          ),
+          cb.Fn('Cut vecs', cut_vecs, n_out=1),
       ),
-      cb.Fn('Cut vecs', cut_vecs, n_out=1),
-    ),
-    cb.Concatenate(axis=axis)
+      cb.Concatenate(axis=axis)
   ),
 
 
