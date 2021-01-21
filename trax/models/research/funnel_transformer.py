@@ -552,6 +552,14 @@ def _FunnelRelativeDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
   ]
 
 
+def _UpsamplerLM(shorten_factor, d_embedding):
+  return tl.Serial(
+      tl.Dense(shorten_factor * d_embedding),
+      tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+          x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
+  )
+
+
 def FunnelTransformerLM(vocab_size,
                         d_model=512,
                         d_ff=2048,
