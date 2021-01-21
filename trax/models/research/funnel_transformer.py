@@ -495,7 +495,8 @@ def _FunnelRelativeDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
                                 dropout, dropout_shared_axes, mode,
                                 ff_activation,
                                 separate_cls, context_bias_layer,
-                                location_bias_layer, total_pooling):
+                                location_bias_layer, total_pooling,
+                                upsampling=False):
   """Returns a list of layers that implements a Transformer decoder block.
 
   The input is an activation tensor.
@@ -519,11 +520,18 @@ def _FunnelRelativeDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
-  pooling = tl.Serial(
-    tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
-      x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
-    tl.Dense(d_model)
-  )
+  if upsampling is True:
+    funnel_upsampling_downsampling = tl.Serial(
+      tl.Dense(shorten_factor * d_model),
+      tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+        x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
+    )
+  else:
+    funnel_upsampling_downsampling = tl.Serial(
+      tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
+        x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
+      tl.Dense(d_model)
+    )
 
   attention = RelativeAttentionLMLayer(
       d_model, context_bias_layer, location_bias_layer, separate_cls,
@@ -536,69 +544,7 @@ def _FunnelRelativeDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Branch(pooling, None),  # h', h
-      tl.Parallel(
-        tl.LayerNorm(),
-        tl.LayerNorm()
-      ),
-      tl.Residual(
-          tl.Select([0, 1, 1]),  # h', h, h
-          attention,
-          dropout_,
-      ),
-      tl.Residual(
-          feed_forward
-      ),
-  ]
-
-
-def _UpsamplingRelativeDecoderBlock(shorten_factor, d_model, d_ff, n_heads,
-                                dropout, dropout_shared_axes, mode,
-                                ff_activation,
-                                separate_cls, context_bias_layer,
-                                location_bias_layer, total_pooling):
-  """Returns a list of layers that implements a Transformer decoder block.
-
-  The input is an activation tensor.
-
-  Args:
-    d_model: Final dimension of tensors at most points in the model, including
-        the initial embedding output.
-    d_ff: Size of special dense layer in the feed-forward part of each block.
-    n_heads: Number of attention heads.
-    dropout: Stochastic rate (probability) for dropping an activation value
-        when applying dropout within a block.
-    dropout_shared_axes: Tensor axes on which to share a dropout mask.
-        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
-        a useful way to save memory and apply consistent masks to activation
-        vectors at different sequence positions.
-    mode: If `'train'`, each block will include dropout; else, it will
-        pass all values through unaltered.
-    ff_activation: Type of activation function at the end of each block; must
-        be an activation-type subclass of `Layer`.
-
-  Returns:
-    A list of layers that maps an activation tensor to an activation tensor.
-  """
-
-  upsampling = tl.Serial(
-    tl.Dense(shorten_factor * d_model),
-    tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
-      x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
-  )
-
-  attention = RelativeAttentionLMLayer(
-      d_model, context_bias_layer, location_bias_layer, separate_cls,
-      total_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
-
-  feed_forward = _FeedForwardBlock(
-      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
-
-  dropout_ = tl.Dropout(
-      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
-
-  return [
-      tl.Branch(upsampling, None),  # h', h
+      tl.Branch(funnel_upsampling_downsampling, None),  # h', h
       tl.Parallel(
         tl.LayerNorm(),
         tl.LayerNorm()
@@ -704,10 +650,21 @@ def FunnelTransformerLM(vocab_size,
         separate_cls=separate_cls,
         context_bias_layer=context_bias_layer,
         location_bias_layer=location_bias_layer,
-        total_pooling=total_pooling_acc)]
+        total_pooling=total_pooling_acc,
+        upsampling=False)]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
+
+  upsampling_layer = _FunnelRelativeDecoderBlock(
+                        total_shorten_factor, d_model, d_ff, n_heads, dropout,
+                        dropout_shared_axes, mode,
+                        ff_activation,
+                        separate_cls=separate_cls,
+                        context_bias_layer=context_bias_layer,
+                        location_bias_layer=location_bias_layer,
+                        total_pooling=total_pooling_acc,
+                        upsampling=True)
 
   conv_layer = tl.Serial(
       tl.LayerNorm(),
@@ -727,14 +684,7 @@ def FunnelTransformerLM(vocab_size,
                       embedding_layer=token_encoder),
           funnel_blocks,
           tl.LayerNorm(),
-          _UpsamplingRelativeDecoderBlock(
-            total_pooling_acc, d_model, d_ff, n_heads, dropout,
-            dropout_shared_axes, mode,
-            ff_activation,
-            separate_cls=separate_cls,
-            context_bias_layer=context_bias_layer,
-            location_bias_layer=location_bias_layer,
-            total_pooling=total_pooling_acc)
+          upsampling_layer,
       ),
       conv_layer,
       post_decoder_blocks,
