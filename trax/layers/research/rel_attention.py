@@ -43,24 +43,24 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
                            separate_cls, total_kv_pooling,
                            n_heads=1, dropout=0.0, mode='train'):
   """Returns a layer that maps (q, k, v, masks) to (activations, masks).
-  For number of keys being smaller than number of queries layer works in O(q^2*d).
+  When number of keys is smaller than number of queries layer works in O(q^2*d).
   Otherwise it is O(q*k*d). That is because we need to shift relative distances
   by a fraction of 1 / current_upsampling_rate.
   Visual explanation:
   [01][23][45][67] -> [0][1][2][3][4][5][6][7]
   For token [0] we calculate relative distances as follows:
   * 0 2 4 6
-  However for token [1] we need relative distances changed by 1, more specifically:
+  However for token [1] we need relative distances changed by 1, specifically:
   * -1 1 3 5
-  So we not only need calculate the distances that corresponds to spacing between
-  the keys but also for the ones in between because there are more than one query
-  tokens for single key token.
+  So we not only need to calculate the distances that corresponds to spacing
+  between the keys but also for the ones in between because there are more than
+  one query tokens for single key token.
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     context_bias_layer: Global context bias from Transformer XL's attention.
-      !!! There should be one such layer shared for all relative attention layers.
+    !!! There should be one such layer shared for all relative attention layers
     location_bias_layer: Global location bias from Transformer XL's attention.
-      !!! There should be one such layer shared for all relative attention layers.
+    !!! There should be one such layer shared for all relative attention layers
     separate_cls: True/False if we separate_cls in calculations.
     total_kv_pooling: Accumulated pool size of keys/values used at this layer
     n_heads: Number of attention heads.
@@ -101,9 +101,9 @@ def RelativeAttentionLMLayer(d_feature, context_bias_layer, location_bias_layer,
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     context_bias_layer: Global context bias from Transformer XL's attention.
-      !!! There should be one such layer shared for all relative attention layers.
+    !!! There should be one such layer shared for all relative attention layers.
     location_bias_layer: Global location bias from Transformer XL's attention.
-      !!! There should be one such layer shared for all relative attention layers.
+    !!! There should be one such layer shared for all relative attention layers.
     separate_cls: True/False if we separate_cls in calculations.
     total_kv_pooling: Accumulated pool size of keys/values used at this layer
     n_heads: Number of attention heads.
@@ -250,7 +250,7 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
         total_pooling: The combined pool size of previously used funnel blocks.
     """
 
-  def CalculatePositionalEmbeddings(queries, keys):
+  def PositionsVectors(queries, keys):
     is_funnel_layer = queries.shape != keys.shape
     keys_len, queries_len = keys.shape[1], queries.shape[1]
     current_pooling_ratio = keys_len / queries_len
@@ -276,17 +276,19 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
       cls_offset = (current_pooling_ratio - 1) * total_pooling
       positions = positions + cls_offset
 
-    return encode_sequence(positions)
+    return positions
 
-  def encode_sequence(positions):
+  def Sinusoidal_Embeddings(positions):
     inv_freq = 1 / (10000 ** (np.arange(0.0, d_feature, 2.0) / d_feature))
     sinusoid_freq = np.einsum('i,j->ij', positions, inv_freq)
     pos_emb = np.concatenate([np.sin(sinusoid_freq),
                               np.cos(sinusoid_freq)], axis=1)
     return pos_emb
 
-  return cb.Fn('Positional embeddings', CalculatePositionalEmbeddings,
-               n_out=1)
+  return cb.Serial(
+      cb.Fn('Generate positions vectors', PositionsVectors, n_out=1),
+      cb.Fn('Transform to sinusoidal encodings', Sinusoidal_Embeddings, n_out=1)
+  )
 
 
 def calc_funnel_ratio(keys_len, queries_len):
