@@ -519,3 +519,170 @@ def FunnelTransformer(vocab_size,
       tl.LayerNorm(),
       tl.Dense(vocab_size),
   )
+
+def _EncoderDecoderBlock(d_model, d_ff, n_heads,
+                         dropout, dropout_shared_axes, mode, ff_activation):
+  """Returns a list of layers implementing a Transformer encoder-decoder block.
+
+  The input is a triple (decoder_activations, mask, encoder_activiations) where
+  the mask is created from the original input token IDs to prevent attending to
+  the padding part of the encoder.
+
+  Args:
+    d_model: Final dimension of tensors at most points in the model, including
+        the initial embedding output.
+    d_ff: Size of special dense layer in the feed-forward part of each block.
+    n_heads: Number of attention heads.
+    dropout: Stochastic rate (probability) for dropping an activation value
+        when applying dropout within a block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
+    mode: If `'train'`, each block will include dropout; else, it will
+        pass all values through unaltered.
+    ff_activation: Type of activation function at the end of each block; must
+        be an activation-type subclass of `Layer`.
+
+  Returns:
+    A list of layers which maps triples (decoder_activations, mask,
+    encoder_activations) to triples of the same sort.
+  """
+  def _Dropout():
+    return tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
+
+  attention_qkv = tl.AttentionQKV(
+      d_model, n_heads=n_heads, dropout=dropout, mode=mode)
+
+  causal_attention = tl.CausalAttention(
+      d_model, n_heads=n_heads, mode=mode)
+
+  feed_forward = _FeedForwardBlock(
+      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+
+  return [                             # vec_d masks vec_e
+      tl.Residual(
+          tl.LayerNorm(),              # vec_d ..... .....
+          causal_attention,            # vec_d ..... .....
+          _Dropout(),                  # vec_d ..... .....
+      ),
+      tl.Residual(
+          tl.LayerNorm(),              # vec_d ..... .....
+          tl.Select([0, 2, 2, 1, 2]),  # vec_d vec_e vec_e masks vec_e
+          attention_qkv,               # vec_d masks vec_e
+          _Dropout(),                  # vec_d masks vec_e
+      ),
+      tl.Residual(
+          feed_forward                 # vec_d masks vec_e
+      ),
+  ]
+
+def FullFunnelTransformer(input_vocab_size,
+                         output_vocab_size=None,
+                         d_model=512,
+                         d_ff=2048,
+                         encoder_segment_lengths=(2, 2, 2),
+                         n_decoder_layers=6,
+                         n_heads=8,
+                         max_len=2048,
+                         dropout=0.1,
+                         dropout_shared_axes=None,
+                         mode='train',
+                         ff_activation=tl.Relu,
+                         pool_layer=tl.AvgPool,
+                         pool_size=(2,),
+                         strides=(2,)):
+
+  assert encoder_segment_lengths
+  n_encoder_segments = len(encoder_segment_lengths)
+
+  def Embedder(vocab_size):  # tokens --> vectors
+    return [
+        tl.Embedding(vocab_size, d_model),
+        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
+    ]
+
+  in_embedder = Embedder(input_vocab_size)
+  out_embedder = (in_embedder if output_vocab_size is None
+                  else Embedder(output_vocab_size))
+
+  # Positional encodings are not shared between encoder and decoder.
+  # Since encoder doesn't run stepwise, we do not use predict mode there.
+  encoder_mode = 'eval' if mode == 'predict' else mode
+  in_encoder = in_embedder + [
+      tl.PositionalEncoding(max_len=max_len, mode=encoder_mode)
+  ]
+  out_encoder = out_embedder + [
+      tl.PositionalEncoding(max_len=max_len, mode=mode)
+  ]
+
+  if output_vocab_size is None:
+    output_vocab_size = input_vocab_size
+
+  total_pooling = 1
+  context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model, n_heads)
+
+  encoder_blocks = []
+
+  for i in range(n_encoder_segments):
+    # Building i'th segment
+    for _ in range(encoder_segment_lengths[i]):
+      # Create segment_size encoder blocks
+      encoder_blocks.append(
+          _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout,
+                                dropout_shared_axes,
+                                mode, ff_activation,
+                                False,
+                                context_bias_layer,
+                                location_bias_layer,
+                                total_pooling))
+
+    # If not last segment, add funnel block
+    if i != n_encoder_segments - 1:
+      encoder_blocks.append(
+          _FunnelBlock(d_model, d_ff, n_heads, dropout,
+                       dropout_shared_axes, mode,
+                       ff_activation, pool_layer, pool_size,
+                       strides, False,
+                       context_bias_layer,
+                       location_bias_layer,
+                       total_pooling))
+
+      total_pooling = total_pooling * pool_size[0]
+
+  encoder = tl.Serial(  # tok_e mask_e
+      in_encoder,  # vec_e mask_e
+      encoder_blocks,
+      tl.LayerNorm()
+  )
+  if mode == 'predict':
+    encoder = tl.Cache(encoder)
+
+  encoder_decoder_blocks = [
+      _EncoderDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+                           mode, ff_activation)
+      for i in range(n_decoder_layers)]
+
+  # Assemble and return the model.
+  return tl.Serial(
+      # Input: encoder_side_tokens, decoder_side_tokens
+      # Copy decoder tokens for use in loss.
+      tl.Select([0, 1, 1]),               # tok_e tok_d tok_d 3
+
+      # Encode.
+      tl.Branch([], tl.PaddingMask()),    # tok_e masks tok_d tok_d 4
+      encoder,                            # vec_e masks tok_d tok_d 4
+
+      # Decode.
+      tl.Select([2, 1, 0]),               # tok_d masks vec_e tok_d 4
+      tl.ShiftRight(mode=mode),           # tok_d masks vec_e tok_d 4
+      out_encoder,                        # vec_d masks vec_e tok_d 4
+      tl.Branch(
+          [], tl.EncoderDecoderMask()),   # vec_d masks_d vec_e tok_d 4
+      encoder_decoder_blocks,             # vec_d masks ..... ..... 5
+      tl.LayerNorm(),                     # vec_d ..... ..... ..... 5
+
+      # Map to output vocab.
+      tl.Select([0], n_in=3),             # vec_d tok_d
+      tl.Dense(output_vocab_size),        # vec_d .....
+  )
