@@ -27,7 +27,7 @@ import trax.models.research.funnel_transformer as ft
 class FullFunnelTransformerTest(parameterized.TestCase):
 
   def test_full_transformer_forward_shape(self):
-    input_vocab_size = 5,
+    input_vocab_size = 5
     output_vocab_size = 5
     model = ft.FullFunnelTransformer(
         input_vocab_size, output_vocab_size, d_model=32, d_ff=64,

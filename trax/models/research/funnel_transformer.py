@@ -80,6 +80,14 @@ def MaskPool(pool_size=(2,), strides=(2,), separate_cls=True):
       tl.Fn('reshape_back', lambda x: x[..., None].swapaxes(1, -1))
   )
 
+@assert_shape('b1de->b1Se')
+def EncoderDecoderMaskPool(pool_size=(2,), strides=(2,)):
+  return tl.Serial(
+      tl.Fn('squeeze', lambda x: x.squeeze(axis=1)),
+      PoolLayer(tl.MaxPool, pool_size, strides, separate_cls=False),
+      tl.Fn('undo_squeeze', lambda x: x[:, None, :, :])
+  )
+
 
 @assert_shape('bld->bd')
 def SelectFirst():
@@ -520,6 +528,53 @@ def FunnelTransformer(vocab_size,
       tl.Dense(vocab_size),
   )
 
+def _EncoderBlock(d_model, d_ff, n_heads,
+                  dropout, dropout_shared_axes, mode, ff_activation):
+  """Returns a list of layers that implements a Transformer encoder block.
+
+  The input to the block is a pair, (activations, mask), where the mask was
+  created from the original source tokens to prevent attending to the padding
+  part of the input.
+
+  Args:
+    d_model: Final dimension of tensors at most points in the model, including
+        the initial embedding output.
+    d_ff: Size of special dense layer in the feed-forward part of each block.
+    n_heads: Number of attention heads.
+    dropout: Stochastic rate (probability) for dropping an activation value
+        when applying dropout within a block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
+    mode: If `'train'`, each block will include dropout; else, it will
+        pass all values through unaltered.
+    ff_activation: Type of activation function at the end of each block; must
+        be an activation-type subclass of `Layer`.
+
+  Returns:
+    A list of layers that maps (activations, mask) to (activations, mask).
+  """
+  attention = tl.Attention(
+      d_model, n_heads=n_heads, dropout=dropout, mode=mode)
+
+  feed_forward = _FeedForwardBlock(
+      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+
+  dropout_ = tl.Dropout(
+      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
+
+  return [
+      tl.Residual(
+          tl.LayerNorm(),
+          attention,
+          dropout_,
+      ),
+      tl.Residual(
+          feed_forward
+      ),
+  ]
+
 def _EncoderDecoderBlock(d_model, d_ff, n_heads,
                          dropout, dropout_shared_axes, mode, ff_activation):
   """Returns a list of layers implementing a Transformer encoder-decoder block.
@@ -577,6 +632,65 @@ def _EncoderDecoderBlock(d_model, d_ff, n_heads,
       ),
   ]
 
+def _NonRelativeFunnelBlock(d_model, d_ff, n_heads,
+                 dropout, dropout_shared_axes, mode, ff_activation,
+                 pool_layer, pool_size, strides, separate_cls):
+  """Internal funnel block. Returns a list of layers implementing it.
+  The input is an activation tensor.
+  Args:
+    d_model: Final dimension of tensors at most points in the model, including
+        the initial embedding output.
+    d_ff: Size of special dense layer in the feed-forward part of each block.
+    n_heads: Number of attention heads.
+    dropout: Stochastic rate (probability) for dropping an activation value
+        when applying dropout within a block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
+    mode: If `'train'`, each block will include dropout; else, it will
+        pass all values through unaltered.
+    ff_activation: Type of activation function at the end of each block; must
+        be an activation-type subclass of `Layer`.
+    pool_layer: Type of pooling layer used for downsampling;
+        should be `tl.AvgPool` or `tl.MaxPool`.
+    pool_size: Shape of window that gets reduced to a single vector value.
+        If the layer inputs are :math:`n`-dimensional arrays, then `pool_size`
+        must be a tuple of length :math:`n-2`.
+    strides: Offsets from the location of one window to the locations of
+        neighboring windows along each axis. If specified, must be a tuple of
+        the same length as `pool_size`. If None, then offsets of 1 along each
+        window axis, :math:`(1, ..., 1)`, will be used.
+    separate_cls: If `True`, pooling in funnel blocks is not applied to
+          embeddings of the first token (`cls` from BERT paper).
+  Returns:
+      A list of layers that maps (activations, mask) to (activations', mask).
+  """
+  pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
+  mask_pooling = MaskPool(pool_size, strides, separate_cls)
+
+  attention = tl.AttentionQKV(d_model, n_heads=n_heads, dropout=dropout,
+                              mode=mode)
+  hidden_dropout = tl.Dropout(
+      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
+
+  feed_forward = _FeedForwardBlock(
+      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+
+  return [  # h, mask
+      tl.LayerNorm(),  # h, mask
+      tl.Branch(pooling, None),  # h', h, mask
+      tl.Residual(
+          tl.Select([0, 1, 1, 2]),  # h', h, h, mask
+          attention,  # attn, mask
+          tl.Parallel(None, mask_pooling),  # attn, mask'
+          hidden_dropout  # attn, mask'
+      ),  # funnel_activations, mask'
+      tl.Residual(
+          feed_forward
+      )
+  ]
+
 def FullFunnelTransformer(input_vocab_size,
                          output_vocab_size=None,
                          d_model=512,
@@ -619,9 +733,6 @@ def FullFunnelTransformer(input_vocab_size,
   if output_vocab_size is None:
     output_vocab_size = input_vocab_size
 
-  total_pooling = 1
-  context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model, n_heads)
-
   encoder_blocks = []
 
   for i in range(n_encoder_segments):
@@ -629,32 +740,24 @@ def FullFunnelTransformer(input_vocab_size,
     for _ in range(encoder_segment_lengths[i]):
       # Create segment_size encoder blocks
       encoder_blocks.append(
-          _RelativeEncoderBlock(d_model, d_ff, n_heads, dropout,
+          _EncoderBlock(d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes,
-                                mode, ff_activation,
-                                False,
-                                context_bias_layer,
-                                location_bias_layer,
-                                total_pooling))
+                                mode, ff_activation))
 
     # If not last segment, add funnel block
     if i != n_encoder_segments - 1:
       encoder_blocks.append(
-          _FunnelBlock(d_model, d_ff, n_heads, dropout,
+          _NonRelativeFunnelBlock(d_model, d_ff, n_heads, dropout,
                        dropout_shared_axes, mode,
                        ff_activation, pool_layer, pool_size,
-                       strides, False,
-                       context_bias_layer,
-                       location_bias_layer,
-                       total_pooling))
+                       strides, False))
 
-      total_pooling = total_pooling * pool_size[0]
-
-  encoder = tl.Serial(  # tok_e mask_e
-      in_encoder,  # vec_e mask_e
+  encoder = tl.Serial(
+      in_encoder,
       encoder_blocks,
       tl.LayerNorm()
   )
+
   if mode == 'predict':
     encoder = tl.Cache(encoder)
 
