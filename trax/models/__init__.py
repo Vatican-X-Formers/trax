@@ -91,4 +91,6 @@ FunnelTransformerEncoder = model_configure(
     funnel_transformer.FunnelTransformerEncoder)
 FunnelTransformer = model_configure(
     funnel_transformer.FunnelTransformer)
+FullFunnelTransformer = model_configure(
+    funnel_transformer.FullFunnelTransformer)
 ResidualShuffleExchange = model_configure(rse.ResidualShuffleExchange)
