@@ -891,6 +891,27 @@ def dictionary_lookup_inputs(vocab_size=gin.REQUIRED,
 
   return Inputs(random_minibatches)
 
+@gin.configurable()
+def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
+                                 batch_size=gin.REQUIRED, n_queries=gin.REQUIRED,
+                                 pad_to_multiple=32):
+  def random_minibatches(n_devices):
+    assert batch_size % n_devices == 0
+
+    while True:
+      dicts, queries = map(np.array, zip(
+          *[dictionary_lookup(vocab_size, n_queries) for _ in
+            range(batch_size)]))
+      zeros = np.zeros((batch_size, 1), dtype=np.int64)
+      inputs = np.concatenate([zeros, dicts], axis=1)
+      inputs = _pad_to_multiple_of(inputs, pad_to_multiple, 1)
+      targets = np.concatenate([zeros, queries], axis=1)
+      targets = _pad_to_multiple_of(targets, pad_to_multiple, 1)
+
+      yield inputs, targets
+
+  return Inputs(random_minibatches)
+
 
 @gin.configurable()
 def sequence_copy_inputs(
