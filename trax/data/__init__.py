@@ -55,5 +55,3 @@ ConvertToUnicode = data_configure(tf_inputs.ConvertToUnicode)
 tokenize = tf_inputs.tokenize
 detokenize = tf_inputs.detokenize
 vocab_size = tf_inputs.vocab_size
-dictionary_lookup_inputs_fft = \
-  data_configure(inputs.dictionary_lookup_inputs_fft)
