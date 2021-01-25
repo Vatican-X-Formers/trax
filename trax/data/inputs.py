@@ -902,9 +902,8 @@ def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
       dicts, queries = map(np.array, zip(
           *[dictionary_lookup(vocab_size, n_queries) for _ in
             range(batch_size)]))
-      zeros = np.zeros((batch_size, 1), dtype=np.int64)
-      inputs = np.concatenate([zeros, dicts], axis=1)
-      targets = np.concatenate([zeros, queries], axis=1)
+      inputs = dicts
+      targets = queries
       masks = np.ones_like(targets)
       targets = _pad_to_multiple_of(targets, pad_to_multiple, 1)
       inputs = _pad_to_multiple_of(inputs, pad_to_multiple, 1)
