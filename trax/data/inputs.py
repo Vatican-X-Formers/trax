@@ -909,7 +909,7 @@ def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
       inputs = _pad_to_multiple_of(inputs, pad_to_multiple, 1)
       masks = _pad_to_multiple_of(masks, pad_to_multiple, 1)
 
-      yield inputs, inputs, targets, masks
+      yield inputs, targets, targets, masks
 
   return Inputs(random_minibatches)
 
