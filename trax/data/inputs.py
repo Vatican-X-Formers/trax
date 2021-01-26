@@ -904,11 +904,10 @@ def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
     masks = _pad_to_multiple_of(masks, pad_to_multiple, 1)
 
     while True:
-      dicts, queries = map(np.array, zip(
-          *[dictionary_lookup(vocab_size, n_queries) for _ in
-            range(batch_size)]))
+      w = np.random.randint(low=1, high=vocab_size - 1,
+                            size=(batch_size, n_queries))
       zeros = np.zeros((batch_size, 1), dtype=np.int64)
-      inputs = np.concatenate([zeros, dicts, zeros, queries], axis=1)
+      inputs = np.concatenate([zeros, w, zeros, w], axis=1)
       inputs = _pad_to_multiple_of(inputs, pad_to_multiple, 1)
 
       encoder_inputs = np.zeros_like(inputs)
