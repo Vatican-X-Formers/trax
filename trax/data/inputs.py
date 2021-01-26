@@ -898,8 +898,8 @@ def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
   def random_minibatches(n_devices):
     assert batch_size % n_devices == 0
 
-    masks = np.concatenate([np.zeros((batch_size, 2 * vocab_size)),  # + zeros
-                            np.ones((batch_size, 2 * n_queries))], axis=1)
+    masks = np.concatenate([np.zeros((batch_size, 2 + n_queries)),  # + zeros
+                            np.ones((batch_size, n_queries))], axis=1)
 
     masks = _pad_to_multiple_of(masks, pad_to_multiple, 1)
 
