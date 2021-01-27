@@ -388,33 +388,6 @@ def CreateAttentionMaskLayer():
   )
 
 
-def ZeroPadding(n_positions, embedding_layer, axis=1):
-  """
-  Instead of standard zero padding this layer pads tokens with
-  trainable embeddings for zero tokens.
-  """
-
-  def create_zero_pad(vecs):
-    input_shape = np.array(vecs.shape)[:-1]  # cut embeddings
-    input_shape[axis] = n_positions
-    padding = np.zeros(input_shape, dtype=np.int)
-    return padding
-
-  def cut_vecs(vecs):
-    return vecs[:, :-n_positions, :]
-
-  return cb.Serial(
-      cb.Branch(
-          cb.Serial(
-              cb.Fn('Create zero padding', create_zero_pad, n_out=1),
-              embedding_layer
-          ),
-          cb.Fn('Cut vecs', cut_vecs, n_out=1),
-      ),
-      cb.Concatenate(axis=axis)
-  ),
-
-
 @assert_shape('...d->...d')
 def ShiftRightCls(cls_id):
   """Returns a layer that shifts input tokens to the right by one

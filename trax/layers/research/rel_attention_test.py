@@ -84,7 +84,7 @@ class RelAttentionTest(absltest.TestCase):
     xs = _get_xs(q=2, k=4)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
-    self.assertEqual(mask, (1, 1, 2, 4))
+    self.assertEqual(mask.shape, (1, 1, 2, 4))
     np.testing.assert_equal(tl.to_list(mask), [[[[True, True, False, False],
                                                  [True, True, True, True]]]])
 
@@ -93,7 +93,7 @@ class RelAttentionTest(absltest.TestCase):
     xs = _get_xs(q=4, k=2)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
-    self.assertEqual(mask, (1, 1, 4, 2))
+    self.assertEqual(mask.shape, (1, 1, 4, 2))
     np.testing.assert_equal(tl.to_list(mask), [[[[True, False],
                                                  [True, False],
                                                  [True, True],
@@ -104,7 +104,7 @@ class RelAttentionTest(absltest.TestCase):
     xs = _get_xs(q=2, k=2)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
-    self.assertEqual(mask, (1, 1, 2, 2))
+    self.assertEqual(mask.shape, (1, 1, 2, 2))
     np.testing.assert_equal(tl.to_list(mask), [[[[True, False],
                                                  [True, True]]]])
 
