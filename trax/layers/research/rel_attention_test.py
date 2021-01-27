@@ -20,7 +20,6 @@ from absl.testing import absltest
 import numpy as np
 
 from trax import shapes
-
 import trax.layers as tl
 import trax.layers.research.rel_attention as ra
 
@@ -44,17 +43,17 @@ class RelAttentionTest(absltest.TestCase):
 
   def test_fast_shift_matrix_funnel_1(self):
     layer = ra._fast_matrix_shift
-    x = np.array([[[[-3., -2., -1.,  0.,  1.,  2.,  3.],
-                    [-3., -2., -1.,  0.,  1.,  2.,  3.],
-                    [-3., -2., -1.,  0.,  1.,  2.,  3.],
-                    [-3., -2., -1.,  0.,  1.,  2.,  3.]]]]).astype(np.float32)
+    x = np.array([[[[-3., -2., -1., 0., 1., 2., 3.],
+                    [-3., -2., -1., 0., 1., 2., 3.],
+                    [-3., -2., -1., 0., 1., 2., 3.],
+                    [-3., -2., -1., 0., 1., 2., 3.]]]]).astype(np.float32)
 
     y = layer(x, funnel_factor=1, upsampling=False)
     self.assertEqual(y.dtype, np.float32)
-    self.assertEqual(tl.to_list(y), [[[[0.,  1.,  2.,  3.],
-                                      [-1.,  0.,  1.,  2.],
-                                      [-2.,  -1.,  0.,  1.],
-                                      [-3.,  -2., -1.,  0.]]]])
+    self.assertEqual(tl.to_list(y), [[[[0., 1., 2., 3.],
+                                       [-1., 0., 1., 2.],
+                                       [-2., -1., 0., 1.],
+                                       [-3., -2., -1., 0.]]]])
 
   def test_fast_shift_matrix_funnel_2(self):
     layer = ra._fast_matrix_shift
@@ -71,7 +70,7 @@ class RelAttentionTest(absltest.TestCase):
     x = np.array([[[[-3., -2., -1., 0., 1., 2., 3.],
                     [-3., -2., -1., 0., 1., 2., 3.],
                     [-3., -2., -1., 0., 1., 2., 3.],
-                    [-3., -2., -1., 0., 1., 2., 3.],]]]).astype(np.float32)
+                    [-3., -2., -1., 0., 1., 2., 3.], ]]]).astype(np.float32)
 
     y = layer(x, funnel_factor=2, upsampling=True)
     self.assertEqual(y.dtype, np.float32)
@@ -85,6 +84,7 @@ class RelAttentionTest(absltest.TestCase):
     xs = _get_xs(q=2, k=4)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
+    self.assertEqual(mask, (1, 1, 2, 4))
     np.testing.assert_equal(tl.to_list(mask), [[[[True, True, False, False],
                                                  [True, True, True, True]]]])
 
@@ -93,24 +93,18 @@ class RelAttentionTest(absltest.TestCase):
     xs = _get_xs(q=4, k=2)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
+    self.assertEqual(mask, (1, 1, 4, 2))
     np.testing.assert_equal(tl.to_list(mask), [[[[True, False],
                                                  [True, False],
-                                                 [True,  True],
-                                                 [True,  True]]]])
+                                                 [True, True],
+                                                 [True, True]]]])
 
   def test_create_mask_layer(self):
     layer = ra.CreateAttentionMaskLayer()
     xs = _get_xs(q=2, k=2)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
-    np.testing.assert_equal(tl.to_list(mask), [[[[True, False],
-                                                 [True, True]]]])
-
-  def test_positional(self):
-    layer = ra.CreateAttentionMaskLayer()
-    xs = _get_xs(q=2, k=2)
-    layer.init(shapes.signature(xs))
-    _, _, _, mask = layer(xs)
+    self.assertEqual(mask, (1, 1, 2, 2))
     np.testing.assert_equal(tl.to_list(mask), [[[[True, False],
                                                  [True, True]]]])
 
