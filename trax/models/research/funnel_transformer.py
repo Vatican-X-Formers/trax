@@ -167,9 +167,7 @@ def _FunnelBlock(d_model, d_ff, n_heads,
           hidden_dropout                            # attn, mask'
       ),                                            # funnel_activations, mask'
       tl.Residual(
-          tl.LayerNorm(),
-          feed_forward,
-          hidden_dropout,
+          feed_forward
       )
   ]
 
@@ -500,7 +498,7 @@ def _DownsamplerLM(shorten_factor, d_model):
 def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes, mode, ff_activation,
                                 context_bias_layer, location_bias_layer,
-                                total_pooling, shorten_factor, resampler_fn):
+                                total_pooling, resampler_fn):
   """Returns a list of layers that implements a Transformer decoder block.
 
   The input is an activation tensor.
@@ -520,15 +518,12 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
         pass all values through unaltered.
     ff_activation: Type of activation function at the end of each block; must
         be an activation-type subclass of `Layer`.
-    shorten_factor: by how much shorten/upsample at this funnel block.
     resampler_fn: Type of function that performs funnel upsampling/downsampling;
-        callable with signature: shorten_factor, d_model;  must return an
-         activation-type subclass of `Layer`.
+        must be an activation-type subclass of `Layer`.
 
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
-  resampler = resampler_fn(shorten_factor, d_model)
 
   attention = RelativeAttentionLMLayer(
       d_model, context_bias_layer, location_bias_layer,
@@ -544,7 +539,7 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   return [
       tl.LayerNorm(),            # h
       tl.Branch(tl.Serial(
-          resampler,
+          resampler_fn,
           tl.LayerNorm(),
       ), None),                  # h', h
       tl.Residual(
@@ -649,8 +644,7 @@ def FunnelTransformerLM(vocab_size,
         context_bias_layer=context_bias_layer,
         location_bias_layer=location_bias_layer,
         total_pooling=total_pooling_acc,
-        shorten_factor=shorten_factor,
-        resampler_fn=_DownsamplerLM)]
+        resampler_fn=_DownsamplerLM(shorten_factor, d_model))]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
@@ -662,8 +656,7 @@ def FunnelTransformerLM(vocab_size,
       context_bias_layer=context_bias_layer,
       location_bias_layer=location_bias_layer,
       total_pooling=total_pooling_acc,
-      shorten_factor=total_pooling_acc,
-      resampler_fn=_UpsamplerLM)
+      resampler_fn=_UpsamplerLM(total_pooling_acc, d_model))
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_pooling_acc),

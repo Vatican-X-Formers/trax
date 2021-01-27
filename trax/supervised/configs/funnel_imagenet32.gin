@@ -21,10 +21,9 @@ import trax.supervised.trainer_lib
 # Parameters for batcher:
 # ==============================================================================
 batcher.data_streams = @tf_inputs.data_streams
-batcher.batch_size_per_device = 1
+batcher.batch_size_per_device = 4
 batcher.eval_batch_size = 8
 batcher.max_eval_length = 3072  # 32 * 32 * 3
-batcher.variable_shapes = False
 
 # Parameters for data_streams:
 # ==============================================================================
@@ -32,15 +31,14 @@ data_streams.data_dir = None
 data_streams.dataset_name = 'downsampled_imagenet/32x32'
 data_streams.input_name = 'image'
 data_streams.target_name = 'image'
-data_streams.bare_preprocess_fn = \
-    @trax.data.tf_inputs.downsampled_imagenet_flatten_bare_preprocess
+data_streams.bare_preprocess_fn = @trax.data.tf_inputs.downsampled_imagenet_flatten_bare_preprocess
 
 # Parameters for multifactor:
 # ==============================================================================
 # 0.0442 ~= 512^-0.5 = d_model^-0.5
 multifactor.constant = 0.0442
 multifactor.factors = 'constant * linear_warmup * rsqrt_decay'
-multifactor.warmup_steps = 16000
+multifactor.warmup_steps = 8000
 
 # Parameters for Adam:
 # ==============================================================================
@@ -59,14 +57,13 @@ train.steps = 400000
 train.checkpoints_at = \
     [1000, 5000, 10000, 20000, 40000, 60000, 80000,
      100000, 200000, 300000, 400000, 500000]
-train.permanent_checkpoints_at = \
-    [100000, 150000, 200000, 250000, 300000, 350000]
+train.permanent_checkpoints_at = [100000, 150000, 200000, 250000, 300000, 350000]
 
 # Parameters for FunnelTransformerLM:
 # ==============================================================================
 FunnelTransformerLM.d_ff = 2048
 FunnelTransformerLM.d_model = 512
-FunnelTransformerLM.dropout = 0.01
+FunnelTransformerLM.dropout = 0.04
 FunnelTransformerLM.n_funnel_blocks = (12,)
 FunnelTransformerLM.n_heads = 8
 FunnelTransformerLM.shorten_factors = (3,)
