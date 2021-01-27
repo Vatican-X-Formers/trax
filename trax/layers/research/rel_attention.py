@@ -79,6 +79,47 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
   )
 
 
+@assert_shape('bSq,blk,blv,b1xl->bSd,b1xl')
+def RelativeAttentionLayerEncoderDecoder(
+    d_feature, context_bias_layer, location_bias_layer,
+    separate_cls, total_pooling, ed_offset,
+    n_heads=1, dropout=0.0, mode='train'):
+  """Returns a layer that maps (q, k, v, mask) to (activations, mask).
+
+  See Transformer XL paper for further context/details.
+
+  Args:
+    d_feature: Depth/dimensionality of feature embedding.
+    context_bias_layer: Global context bias from Transformer XL's attention.
+    location_bias_layer: Global location bias from Transformer XL's attention.
+    separate_cls: True/False if we separate_cls in calculations.
+    total_pooling: The combined pool size of previously used funnel blocks.
+    ed_offset: encoder decoder offset equals to sum of decoder and encoder
+         tokens
+    n_heads: Number of attention heads.
+    dropout: Probabilistic rate for internal dropout applied to attention
+        activations (based on query-key pairs) before dotting them with values.
+    mode: One of `'train'`, `'eval'`, or `'predict'`.
+  """
+  return cb.Serial(
+      cb.Branch(
+          PositionalEmbeddings(d_feature, False, 1, ed_offset=ed_offset),
+          cb.Select([0]), cb.Select([1])),
+      cb.Parallel(
+          core.Dense(d_feature),
+          core.Dense(d_feature),
+          core.Dense(d_feature),
+          core.Dense(d_feature),
+      ),
+      context_bias_layer,
+      location_bias_layer,
+      RelativeAttention(  # pylint: disable=no-value-for-parameter
+          separate_cls=separate_cls, n_heads=n_heads,
+          dropout=dropout, mode=mode),
+      core.Dense(d_feature),
+  )
+
+
 class RelativeAttention(base.Layer):
   """ Layer that maps (location_bias, context_bias, pos_emb, q, k, v, mask)
       to (activations, mask).
@@ -202,7 +243,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
   return out, dots
 
 
-def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
+def PositionalEmbeddings(d_feature, separate_cls, total_pooling, ed_offset=0):
   """Returns a layer that based of queries and keys and a combined pool size
      before in the funnel transformer computes positional embeddings for
      relative attention calculations.
@@ -211,12 +252,15 @@ def PositionalEmbeddings(d_feature, separate_cls, total_pooling):
         d_feature: Depth/dimensionality of feature embedding.
         separate_cls: True/False if we separate_cls in calculations.
         total_pooling: The combined pool size of previously used funnel blocks.
+        ed_offset: encoder decoder offset equals to sum of decoder and encoder
+         tokens
     """
 
   def CalculatePositionalEmbeddings(queries, keys):
     is_funnel_layer = queries.shape != keys.shape
     keys_len = keys.shape[1]
-    positions = np.arange(-keys_len + 1, keys_len, 1.0) * total_pooling
+    positions = np.arange(-keys_len + 1, keys_len, 1.0) * total_pooling \
+                  + ed_offset
 
     if is_funnel_layer and separate_cls:
       # For pool_size 2 without separating cls we have got
