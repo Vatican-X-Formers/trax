@@ -63,8 +63,8 @@ class FunnelTransformerTest(parameterized.TestCase):
     self.assertEqual(y_cls.shape, long.shape)
     self.assertEqual(y.shape, long.shape)
 
-    self.assertEqual(y_cls.squeeze().tolist(), 5 * [2] + 3 * [1])
-    self.assertEqual(y.squeeze().tolist(), 8 * [2])
+    self.assertEqual(y_cls.squeeze().tolist(), 5*[2] + 3*[1])
+    self.assertEqual(y.squeeze().tolist(), 8*[2])
 
   def test_funnel_block_forward_shape(self):
     n_even = 4
