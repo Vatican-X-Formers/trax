@@ -157,15 +157,15 @@ def _FunnelBlock(d_model, d_ff, n_heads,
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
 
-  return [                                  # h, mask
-      tl.LayerNorm(),                       # h, mask
-      tl.Branch(pooling, None),             # h', h, mask
+  return [                                          # h, mask
+      tl.LayerNorm(),                               # h, mask
+      tl.Branch(pooling, None),                     # h', h, mask
       tl.Residual(
-          tl.Select([0, 1, 1, 2]),          # h', h, h, mask
-          attention,                        # attn, mask
-          tl.Parallel(None, mask_pooling),  # attn, mask'
-          hidden_dropout                    # attn, mask'
-      ),                                    # funnel_activations, mask'
+          tl.Select([0, 1, 1, 2]),                  # h', h, h, mask
+          attention,                                # attn, mask
+          tl.Parallel(None, mask_pooling),          # attn, mask'
+          hidden_dropout                            # attn, mask'
+      ),                                            # funnel_activations, mask'
       tl.Residual(
           feed_forward
       )
