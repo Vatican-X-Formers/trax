@@ -860,8 +860,7 @@ def dictionary_lookup(vocab_size, k):
   my_dict_str = [(k, v) for k, v in my_dict.items()]
   np.random.shuffle(my_dict_str)
   my_dict_str = np.concatenate(my_dict_str)
-  # key = np.random.randint(1, vocab_size, (k,))
-  key = key = 1 + np.random.choice(vocab_size - 1, k)
+  key = 1 + np.random.choice(vocab_size - 1, k, replace=False)
   value = itemgetter(*key)(my_dict)
   target = np.concatenate([(k, v) for k, v in zip(key, value)])
 
@@ -909,7 +908,6 @@ def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
             range(batch_size)]))
       inputs = dicts
       targets = queries
-      masks = np.ones_like(targets)
       targets = _pad_to_multiple_of(targets, pad_to_multiple, 1)
       inputs = _pad_to_multiple_of(inputs, pad_to_multiple, 1)
       masks = _pad_to_multiple_of(masks, pad_to_multiple, 1)
