@@ -76,6 +76,13 @@ def MaskPool(pool_size=(2,), strides=(2,), separate_cls=True):
       tl.Fn('reshape_back', lambda x: x[..., None].swapaxes(1, -1))
   )
 
+@assert_shape('b1de->b1Se')
+def EncoderDecoderMaskPool(pool_size=(2,), strides=(2,)):
+  return tl.Serial(
+      tl.Fn('squeeze', lambda x: x.squeeze(axis=1)),
+      PoolLayer(tl.MaxPool, pool_size, strides, separate_cls=False),
+      tl.Fn('undo_squeeze', lambda x: x[:, None, :, :])
+  )
 
 @assert_shape('bld->bd')
 def SelectFirst():
