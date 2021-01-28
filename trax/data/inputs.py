@@ -860,7 +860,8 @@ def dictionary_lookup(vocab_size, k):
   my_dict_str = [(k, v) for k, v in my_dict.items()]
   np.random.shuffle(my_dict_str)
   my_dict_str = np.concatenate(my_dict_str)
-  key = np.random.randint(1, vocab_size, (k,))
+  # key = np.random.randint(1, vocab_size, (k,))
+  key = key = 1 + np.random.choice(vocab_size - 1, k)
   value = itemgetter(*key)(my_dict)
   target = np.concatenate([(k, v) for k, v in zip(key, value)])
 
