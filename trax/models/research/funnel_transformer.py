@@ -610,6 +610,10 @@ def FunnelTransformerLM(vocab_size,
     to activations over a vocab set.
   """
   assert len(n_funnel_blocks) == len(shorten_factors)
+  shift_mode = mode
+  if mode == 'infer':
+    mode = 'eval'
+    shift_mode = 'predict'
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
@@ -668,7 +672,7 @@ def FunnelTransformerLM(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
-      tl.ShiftRight(mode=mode),  # toks
+      tl.ShiftRight(mode=shift_mode),  # toks
       token_encoder,             # vecs
       pre_decoder_blocks,        # vecs
       tl.Dup(),
