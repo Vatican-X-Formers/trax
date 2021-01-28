@@ -25,6 +25,22 @@ from trax import shapes
 import trax.models.research.funnel_transformer as ft
 
 
+class FullFunnelTransformerTest(parameterized.TestCase):
+
+  def test_full_transformer_forward_shape(self):
+    input_vocab_size = 5
+    output_vocab_size = 5
+    model = ft.FullFunnelTransformer(
+        input_vocab_size, output_vocab_size, d_model=32, d_ff=64,
+        encoder_segment_lengths=(2, 2, 2), n_decoder_layers=2, n_heads=2)
+    xs = [np.ones((3, 5)).astype(np.int32), np.ones((3, 5)).astype(np.int32)]
+    _, _ = model.init(shapes.signature(xs))
+    y, _ = model(xs)
+
+    vocab_size = output_vocab_size or input_vocab_size
+    self.assertEqual(y.shape, (3, 5, vocab_size))
+
+
 class FunnelTransformerTest(parameterized.TestCase):
 
   def test_mean_pool(self):

@@ -157,15 +157,15 @@ def _FunnelBlock(d_model, d_ff, n_heads,
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
 
-  return [                                          # h, mask
-      tl.LayerNorm(),                               # h, mask
-      tl.Branch(pooling, None),                     # h', h, mask
+  return [  # h, mask
+      tl.LayerNorm(),  # h, mask
+      tl.Branch(pooling, None),  # h', h, mask
       tl.Residual(
-          tl.Select([0, 1, 1, 2]),                  # h', h, h, mask
-          attention,                                # attn, mask
-          tl.Parallel(None, mask_pooling),          # attn, mask'
-          hidden_dropout                            # attn, mask'
-      ),                                            # funnel_activations, mask'
+          tl.Select([0, 1, 1, 2]),  # h', h, h, mask
+          attention,  # attn, mask
+          tl.Parallel(None, mask_pooling),  # attn, mask'
+          hidden_dropout  # attn, mask'
+      ),  # funnel_activations, mask'
       tl.Residual(
           feed_forward
       )
@@ -274,17 +274,17 @@ def FunnelTransformerEncoder(vocab_size,
   cls_pooling = SelectFirst() if separate_cls else tl.Mean(axis=1)
 
   # Assemble and return the model.
-  return tl.Serial(                               # toks
+  return tl.Serial(  # toks
       # Encode.
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks,                             # vecs masks
-      tl.Select([0], n_in=2),                     # vecs
-      tl.LayerNorm(),                             # vecs
+      encoder_blocks,  # vecs masks
+      tl.Select([0], n_in=2),  # vecs
+      tl.LayerNorm(),  # vecs
 
       # Map to output categories.
-      cls_pooling,                                # cls
-      tl.Dense(n_classes),                        # cls
+      cls_pooling,  # cls
+      tl.Dense(n_classes),  # cls
   )
 
 
@@ -393,21 +393,21 @@ def FunnelTransformer(vocab_size,
   total_pool_size = pool_size[0] ** (len(encoder_segment_lengths) - 1)
 
   # Assemble and return the model.
-  return tl.Serial(                               # toks
+  return tl.Serial(  # toks
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks_before_first_pooling,        # vecs masks
+      encoder_blocks_before_first_pooling,  # vecs masks
       tl.Select([0, 1, 0, 1]),
       # vecs masks residual = vecs old_masks
-      encoder_blocks_from_first_pooling,          # vecs masks residual masks
-      tl.Select([0, 2, 3]),                       # vecs residual masks
+      encoder_blocks_from_first_pooling,  # vecs masks residual masks
+      tl.Select([0, 2, 3]),  # vecs residual masks
       tl.Parallel(
           # residual from first segment is taken before
           # normalization, so apply it now
-          None, tl.LayerNorm(), None),            # vecs norm(residual) masks
+          None, tl.LayerNorm(), None),  # vecs norm(residual) masks
       _Upsampler(total_pool_size, separate_cls),  # vecs masks
       decoder_blocks,
-      tl.Select([0], n_in=2),                     # vecs
+      tl.Select([0], n_in=2),  # vecs
       tl.LayerNorm(),
       tl.Dense(vocab_size),
   )
@@ -467,32 +467,32 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Residual(               # vecs
+      tl.Residual(  # vecs
           tl.LayerNorm(),
           tl.Select([0, 0, 0]),
           attention,
           dropout_,
-      ),                         # vecs
+      ),  # vecs
       tl.Residual(
           feed_forward
-      ),                         # vecs
+      ),  # vecs
   ]
 
 
 def _UpsamplerLM(shorten_factor, d_model):
   return tl.Serial(
-        tl.Dense(shorten_factor * d_model),
-        tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
-            x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
-    )
+      tl.Dense(shorten_factor * d_model),
+      tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+          x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
+  )
 
 
 def _DownsamplerLM(shorten_factor, d_model):
   return tl.Serial(
-        tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
-            x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
-        tl.Dense(d_model)
-    )
+      tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
+          x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
+      tl.Dense(d_model)
+  )
 
 
 def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
@@ -537,11 +537,11 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.LayerNorm(),            # h
+      tl.LayerNorm(),  # h
       tl.Branch(tl.Serial(
           resampler_fn,
           tl.LayerNorm(),
-      ), None),                  # h', h
+      ), None),  # h', h
       tl.Residual(
           tl.Select([0, 1, 1]),  # h', h, h
           attention,
@@ -667,10 +667,10 @@ def FunnelTransformerLM(vocab_size,
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
 
   # Assemble and return the model.
-  return tl.Serial(              # tokens (or chunked tuple of tokens)
+  return tl.Serial(  # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
-      token_encoder,             # vecs
-      pre_decoder_blocks,        # vecs
+      token_encoder,  # vecs
+      pre_decoder_blocks,  # vecs
       tl.Dup(),
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
       funnel_blocks,
@@ -680,5 +680,218 @@ def FunnelTransformerLM(vocab_size,
       tl.Concatenate(),
       conv_layer,
       post_decoder_blocks,
-      tl.Dense(vocab_size),      # vecs
+      tl.Dense(vocab_size),  # vecs
+  )
+
+
+def _EncoderDecoderBlock(d_model, d_ff, n_heads,
+                         dropout, dropout_shared_axes, mode, ff_activation):
+  """Returns a list of layers implementing a Transformer encoder-decoder block.
+  The input is a triple (decoder_activations, mask, encoder_activiations) where
+  the mask is created from the original input token IDs to prevent attending to
+  the padding part of the encoder.
+  Args:
+    d_model: Final dimension of tensors at most points in the model, including
+        the initial embedding output.
+    d_ff: Size of special dense layer in the feed-forward part of each block.
+    n_heads: Number of attention heads.
+    dropout: Stochastic rate (probability) for dropping an activation value
+        when applying dropout within a block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
+    mode: If `'train'`, each block will include dropout; else, it will
+        pass all values through unaltered.
+    ff_activation: Type of activation function at the end of each block; must
+        be an activation-type subclass of `Layer`.
+  Returns:
+    A list of layers which maps triples (decoder_activations, mask,
+    encoder_activations) to triples of the same sort.
+  """
+  def _Dropout():
+    return tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
+
+  attention_qkv = tl.AttentionQKV(
+      d_model, n_heads=n_heads, dropout=dropout, mode=mode)
+
+  causal_attention = tl.CausalAttention(
+      d_model, n_heads=n_heads, mode=mode)
+
+  feed_forward = _FeedForwardBlock(
+      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+
+  return [                             # vec_d masks vec_e
+      tl.Residual(
+          tl.LayerNorm(),              # vec_d ..... .....
+          causal_attention,            # vec_d ..... .....
+          _Dropout(),                  # vec_d ..... .....
+      ),
+      tl.Residual(
+          tl.LayerNorm(),              # vec_d ..... .....
+          tl.Select([0, 2, 2, 1, 2]),  # vec_d vec_e vec_e masks vec_e
+          attention_qkv,               # vec_d masks vec_e
+          _Dropout(),                  # vec_d masks vec_e
+      ),
+      tl.Residual(
+          feed_forward                 # vec_d masks vec_e
+      ),
+  ]
+
+
+def _NonRelativeFunnelBlock(d_model, d_ff, n_heads,
+                 dropout, dropout_shared_axes, mode, ff_activation,
+                 pool_layer, pool_size, strides, separate_cls):
+  """Internal funnel block. Returns a list of layers implementing it.
+  The input is an activation tensor.
+  Args:
+    d_model: Final dimension of tensors at most points in the model, including
+        the initial embedding output.
+    d_ff: Size of special dense layer in the feed-forward part of each block.
+    n_heads: Number of attention heads.
+    dropout: Stochastic rate (probability) for dropping an activation value
+        when applying dropout within a block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
+    mode: If `'train'`, each block will include dropout; else, it will
+        pass all values through unaltered.
+    ff_activation: Type of activation function at the end of each block; must
+        be an activation-type subclass of `Layer`.
+    pool_layer: Type of pooling layer used for downsampling;
+        should be `tl.AvgPool` or `tl.MaxPool`.
+    pool_size: Shape of window that gets reduced to a single vector value.
+        If the layer inputs are :math:`n`-dimensional arrays, then `pool_size`
+        must be a tuple of length :math:`n-2`.
+    strides: Offsets from the location of one window to the locations of
+        neighboring windows along each axis. If specified, must be a tuple of
+        the same length as `pool_size`. If None, then offsets of 1 along each
+        window axis, :math:`(1, ..., 1)`, will be used.
+    separate_cls: If `True`, pooling in funnel blocks is not applied to
+          embeddings of the first token (`cls` from BERT paper).
+  Returns:
+      A list of layers that maps (activations, mask) to (activations', mask).
+  """
+  pooling = PoolLayer(pool_layer, pool_size, strides, separate_cls)
+  mask_pooling = MaskPool(pool_size, strides, separate_cls)
+
+  attention = tl.AttentionQKV(d_model, n_heads=n_heads, dropout=dropout,
+                              mode=mode)
+  hidden_dropout = tl.Dropout(
+      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
+
+  feed_forward = _FeedForwardBlock(
+      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+
+  return [  # h, mask
+      tl.LayerNorm(),  # h, mask
+      tl.Branch(pooling, None),  # h', h, mask
+      tl.Residual(
+          tl.Select([0, 1, 1, 2]),  # h', h, h, mask
+          attention,  # attn, mask
+          tl.Parallel(None, mask_pooling),  # attn, mask'
+          hidden_dropout  # attn, mask'
+      ),  # funnel_activations, mask'
+      tl.Residual(
+          feed_forward
+      )
+  ]
+
+def FullFunnelTransformer(input_vocab_size,
+                          output_vocab_size=None,
+                          d_model=512,
+                          d_ff=2048,
+                          encoder_segment_lengths=(2, 2, 2),
+                          n_decoder_layers=6,
+                          n_heads=8,
+                          max_len=2048,
+                          dropout=0.1,
+                          dropout_shared_axes=None,
+                          mode='train',
+                          ff_activation=tl.Relu,
+                          pool_layer=tl.AvgPool,
+                          pool_size=(2,),
+                          strides=(2,)):
+  assert encoder_segment_lengths
+  n_encoder_segments = len(encoder_segment_lengths)
+
+  def Embedder(vocab_size):  # tokens --> vectors
+    return [
+        tl.Embedding(vocab_size, d_model),
+        tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode),
+    ]
+
+  in_embedder = Embedder(input_vocab_size)
+  out_embedder = (in_embedder if output_vocab_size is None
+                  else Embedder(output_vocab_size))
+
+  # Positional encodings are not shared between encoder and decoder.
+  # Since encoder doesn't run stepwise, we do not use predict mode there.
+  encoder_mode = 'eval' if mode == 'predict' else mode
+  in_encoder = in_embedder + [
+      tl.PositionalEncoding(max_len=max_len, mode=encoder_mode)
+  ]
+  out_encoder = out_embedder + [
+      tl.PositionalEncoding(max_len=max_len, mode=mode)
+  ]
+
+  if output_vocab_size is None:
+    output_vocab_size = input_vocab_size
+
+  encoder_blocks = []
+
+  for i in range(n_encoder_segments):
+    # Building i'th segment
+    for _ in range(encoder_segment_lengths[i]):
+      # Create segment_size encoder blocks
+      encoder_blocks.append(
+          _EncoderBlock(d_model, d_ff, n_heads, dropout,
+                        dropout_shared_axes,
+                        mode, ff_activation))
+
+    # If not last segment, add funnel block
+    if i != n_encoder_segments - 1:
+      encoder_blocks.append(
+          _NonRelativeFunnelBlock(d_model, d_ff, n_heads, dropout,
+                                  dropout_shared_axes, mode,
+                                  ff_activation, pool_layer, pool_size,
+                                  strides, False))
+
+  encoder = tl.Serial(
+      in_encoder,
+      encoder_blocks,
+      tl.LayerNorm()
+  )
+
+  if mode == 'predict':
+    encoder = tl.Cache(encoder)
+
+  encoder_decoder_blocks = [
+      _EncoderDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+                           mode, ff_activation)
+      for i in range(n_decoder_layers)]
+
+  # Assemble and return the model.
+  return tl.Serial(
+      # Input: encoder_side_tokens, decoder_side_tokens
+      # Copy decoder tokens for use in loss.
+      tl.Select([0, 1, 1]),  # tok_e tok_d tok_d 3
+
+      # Encode.
+      tl.Branch([], tl.PaddingMask()),  # tok_e masks tok_d tok_d 4
+      encoder,  # vec_e masks tok_d tok_d 4
+
+      # Decode.
+      tl.Select([2, 1, 0]),  # tok_d masks vec_e tok_d 4
+      tl.ShiftRight(mode=mode),  # tok_d masks vec_e tok_d 4
+      out_encoder,  # vec_d masks vec_e tok_d 4
+      tl.Branch(
+          [], tl.EncoderDecoderMask()),  # vec_d masks_d vec_e tok_d 4
+      encoder_decoder_blocks,  # vec_d masks ..... ..... 5
+      tl.LayerNorm(),  # vec_d ..... ..... ..... 5
+
+      # Map to output vocab.
+      tl.Select([0], n_in=3),  # vec_d tok_d
+      tl.Dense(output_vocab_size),  # vec_d .....
   )
