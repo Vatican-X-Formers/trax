@@ -894,32 +894,54 @@ def dictionary_lookup_inputs(vocab_size=gin.REQUIRED,
 
 @gin.configurable()
 def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
-                             batch_size=gin.REQUIRED, n_queries=gin.REQUIRED,
-                             pad_to_multiple=32):
+                                 batch_size=gin.REQUIRED, n_queries=gin.REQUIRED,
+                                 pad_to_multiple=32):
   def random_minibatches(n_devices):
     assert batch_size % n_devices == 0
 
-
-    masks = np.concatenate([np.zeros((batch_size, 2 * vocab_size)),  # + zeros
-                            np.ones((batch_size, 2 * n_queries))], axis=1)
-
-    masks[:, 2 * vocab_size::2] = 0
-
+    masks = np.ones((batch_size, 2 * n_queries))
+    masks[:, 0::2] = 0
     masks = _pad_to_multiple_of(masks, pad_to_multiple, 1)
 
     while True:
       dicts, queries = map(np.array, zip(
           *[dictionary_lookup(vocab_size, n_queries) for _ in
             range(batch_size)]))
-      zeros = np.zeros((batch_size, 1), dtype=np.int64)
-      inputs = np.concatenate([zeros, dicts, zeros, queries], axis=1)
+      inputs = dicts
+      targets = queries
+      masks = np.ones_like(targets)
+      targets = _pad_to_multiple_of(targets, pad_to_multiple, 1)
       inputs = _pad_to_multiple_of(inputs, pad_to_multiple, 1)
+      masks = _pad_to_multiple_of(masks, pad_to_multiple, 1)
 
-      encoder_inputs = np.zeros_like(inputs)
-
-      yield encoder_inputs, inputs, masks
+      yield inputs, targets, masks
 
   return Inputs(random_minibatches)
+
+# @gin.configurable()
+# def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
+#                              batch_size=gin.REQUIRED, n_queries=gin.REQUIRED,
+#                              pad_to_multiple=32):
+#   def random_minibatches(n_devices):
+#     assert batch_size % n_devices == 0
+#
+#     masks = np.ones((batch_size, 2 * n_queries))
+#     masks[:, 0::2] = 0
+#     masks = _pad_to_multiple_of(masks, pad_to_multiple, 1)
+#
+#     while True:
+#       dicts, queries = map(np.array, zip(
+#           *[dictionary_lookup(vocab_size, n_queries) for _ in
+#             range(batch_size)]))
+#       zeros = np.zeros((batch_size, 1), dtype=np.int64)
+#       inputs = np.concatenate([zeros, dicts, zeros, queries], axis=1)
+#       inputs = _pad_to_multiple_of(inputs, pad_to_multiple, 1)
+#
+#       encoder_inputs = np.zeros_like(inputs)
+#
+#       yield encoder_inputs, inputs, masks
+#
+#   return Inputs(random_minibatches)
 
 # @gin.configurable()
 # def dictionary_lookup_inputs_fft(vocab_size=gin.REQUIRED,
