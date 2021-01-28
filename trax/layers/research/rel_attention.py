@@ -38,8 +38,8 @@ from trax.layers.attention import SplitIntoHeads, MergeHeads
 
 @assert_shape('bSq,blk,blv,b1xl->bSd,b1xl')
 def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
-                           total_kv_pooling, separate_cls, n_heads=1,
-                           dropout=0.0, mode='train'):
+                           total_q_pooling, total_kv_pooling, separate_cls,
+                           ed_offset=0, n_heads=1, dropout=0.0, mode='train'):
   """Returns a layer that maps (q, k, v, masks) to (activations, masks).
   When number of keys is smaller than number of queries layer works in O(q^2*d).
   Otherwise it is O(q*k*d). That is because we need to shift relative distances
@@ -60,8 +60,11 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
     !!! There should be one such layer shared for all relative attention layers
     location_bias_layer: Global location bias from Transformer XL's attention.
     !!! There should be one such layer shared for all relative attention layers
-    separate_cls: True/False if we separate_cls in calculations.
+    total_q_pooling: Accumulated pool size of queries used at this layer
     total_kv_pooling: Accumulated pool size of keys/values used at this layer
+    separate_cls: True/False if we separate_cls in calculations.
+    ed_offset: encoder decoder offset equals to
+        2 * original_decoder_len + 1 * original_encoder_length.
     n_heads: Number of attention heads.
     dropout: Probabilistic rate for internal dropout applied to attention
         activations (based on query-key pairs) before dotting them with values.
@@ -70,7 +73,9 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
 
   return cb.Serial(
       cb.Branch(
-          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
+          PositionalEmbeddings(d_feature, separate_cls,
+                               total_q_pooling, total_kv_pooling,
+                               ed_offset=ed_offset),
           cb.Select([0]),
           cb.Select([1])
       ),
@@ -83,56 +88,20 @@ def RelativeAttentionLayer(d_feature, context_bias_layer, location_bias_layer,
       context_bias_layer,
       location_bias_layer,
       RelativeAttention(  # pylint: disable=no-value-for-parameter
+          is_encoder_decoder=ed_offset>0,
+          total_q_pooling=total_q_pooling,
+          total_kv_pooling=total_kv_pooling,
           separate_cls=separate_cls, n_heads=n_heads,
           dropout=dropout, mode=mode),
       core.Dense(d_feature),
   )
 
-
-@assert_shape('bSq,blk,blv,b1xl->bSd,b1xl')
-def RelativeAttentionLayerEncoderDecoder(
-    d_feature, context_bias_layer, location_bias_layer,
-    separate_cls, total_pooling, ed_offset,
-    n_heads=1, dropout=0.0, mode='train'):
-  """Returns a layer that maps (q, k, v, mask) to (activations, mask).
-
-  See Transformer XL paper for further context/details.
-
-  Args:
-    d_feature: Depth/dimensionality of feature embedding.
-    context_bias_layer: Global context bias from Transformer XL's attention.
-    location_bias_layer: Global location bias from Transformer XL's attention.
-    separate_cls: True/False if we separate_cls in calculations.
-    total_pooling: The combined pool size of previously used funnel blocks.
-    ed_offset: encoder decoder offset equals to sum of decoder and encoder
-         tokens
-    n_heads: Number of attention heads.
-    dropout: Probabilistic rate for internal dropout applied to attention
-        activations (based on query-key pairs) before dotting them with values.
-    mode: One of `'train'`, `'eval'`, or `'predict'`.
-  """
-  return cb.Serial(
-      cb.Branch(
-          PositionalEmbeddings(d_feature, False, 1, ed_offset=ed_offset),
-          cb.Select([0]), cb.Select([1])),
-      cb.Parallel(
-          core.Dense(d_feature),
-          core.Dense(d_feature),
-          core.Dense(d_feature),
-          core.Dense(d_feature),
-      ),
-      context_bias_layer,
-      location_bias_layer,
-      RelativeAttention(  # pylint: disable=no-value-for-parameter
-          separate_cls=separate_cls, n_heads=n_heads,
-          dropout=dropout, mode=mode),
-      core.Dense(d_feature),
-  )
 
 @assert_shape('bSq,blk,blv->bSd')
 def RelativeAttentionLMLayer(d_feature, context_bias_layer, location_bias_layer,
-                             total_kv_pooling, separate_cls=False,
-                             n_heads=1, dropout=0.0, mode='train'):
+                             total_q_pooling, total_kv_pooling,
+                             separate_cls=False, n_heads=1, dropout=0.0,
+                             mode='train'):
   """Returns a layer that maps (q, k, v) to (activations).
   Same as standard Relative attention layer but additionally based on sizes
   of queries and keys prepares a mask that masks out the future.
@@ -144,6 +113,7 @@ def RelativeAttentionLMLayer(d_feature, context_bias_layer, location_bias_layer,
     location_bias_layer: Global location bias from Transformer XL's attention.
     !!! There should be one such layer shared for all relative attention layers
     separate_cls: True/False if we separate_cls in calculations.
+    total_q_pooling: Accumulated pool size of queries used at this layer
     total_kv_pooling: Accumulated pool size of keys/values used at this layer
     n_heads: Number of attention heads.
     dropout: Probabilistic rate for internal dropout applied to attention
@@ -152,7 +122,8 @@ def RelativeAttentionLMLayer(d_feature, context_bias_layer, location_bias_layer,
   """
 
   attention = RelativeAttentionLayer(d_feature, context_bias_layer,
-                                     location_bias_layer, total_kv_pooling,
+                                     location_bias_layer, total_q_pooling,
+                                     total_kv_pooling,
                                      separate_cls, n_heads=n_heads,
                                      dropout=dropout, mode=mode)
 
@@ -178,7 +149,9 @@ class RelativeAttention(base.Layer):
       activation vector shapes.
   """
 
-  def __init__(self, separate_cls, n_heads=1, dropout=0.0, mode='train'):
+  def __init__(self, is_encoder_decoder, total_q_pooling, total_kv_pooling,
+               separate_cls,
+               n_heads=1, dropout=0.0, mode='train'):
     """Returns a new PureAttention instance.
     Args:
       separate_cls: True/False if we separate_cls in calculations.
@@ -188,6 +161,9 @@ class RelativeAttention(base.Layer):
       mode: One of `'train'`, `'eval'`, or `'predict'`.
     """
     super().__init__(n_in=7, n_out=2)
+    self._is_encoder_decoder = is_encoder_decoder
+    self._total_q_pooling = total_q_pooling
+    self._total_kv_pooling = total_kv_pooling
     self._separate_cls = separate_cls
     self._n_heads = n_heads
     self._dropout = dropout
@@ -215,6 +191,9 @@ class RelativeAttention(base.Layer):
         context_bias,
         location_bias,
         mask,
+        total_q_pooling=self._total_q_pooling,
+        total_kv_pooling=self._total_kv_pooling,
+        is_encoder_decoder=self._is_encoder_decoder,
         separate_cls=self._separate_cls,
         dropout=self._dropout,
         mode=self._mode,
@@ -227,7 +206,8 @@ class RelativeAttention(base.Layer):
 
 
 def DotProductAttention(queries, keys, values, pos_emb, context_bias,
-                        location_bias, mask, separate_cls, dropout, mode, rng):
+                        location_bias, mask, total_q_pooling, total_kv_pooling,
+                        is_encoder_decoder, separate_cls, dropout, mode, rng):
   """Computes new activations via masked attention-weighted sum of values.
     This function is the core of the attention mechanism. It:
       - computes per-head attention weights from per-head `queries` and `keys`,
@@ -242,6 +222,8 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
       context_bias: Global context bias from Transformer XL's attention.
       location_bias: Global location bias from Transformer XL's attention.
       mask: Mask that distinguishes positions with real content vs. padding.
+      total_q_pooling: Accumulated pool size of queries used at this layer
+      total_kv_pooling: Accumulated pool size of keys/values used at this layer
       separate_cls: True/False if we separate_cls in calculations.
       dropout: Probabilistic rate for dropout applied to attention strengths
           (based on query-key pairs) before applying them to values.
@@ -253,11 +235,16 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     """
   d_feature = queries.shape[-1]
   keys_len, queries_len = keys.shape[-2], queries.shape[-2]
-  funnel_factor, is_upsampling = calc_funnel_ratio(keys_len, queries_len)
 
   ac = jnp.einsum('bnid,bnjd->bnij', queries + context_bias, keys)
   bd = jnp.einsum('bnid,jnd->bnij', queries + location_bias, pos_emb)
-  bd = _fast_matrix_shift(bd, funnel_factor, is_upsampling)
+
+  if is_encoder_decoder is True:
+    bd = _fast_matrix_shift(bd, funnel_factor=total_q_pooling,
+                            is_upsampling=False)
+  else:
+    funnel_factor, is_upsampling = calc_funnel_ratio(keys_len, queries_len)
+    bd = _fast_matrix_shift(bd, funnel_factor, is_upsampling)
 
   if separate_cls:
     # Masking out location part of attention for cls token
@@ -280,31 +267,27 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
   return out, dots
 
 
-def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
-  """Returns a layer that based on queries, keys and accumulated pool size of
-     keys/values until this layer calculates sinusoidal positional embeddings
-     for relative attention calculations.
+def PositionalEmbeddings(d_feature, separate_cls, total_q_pooling,
+                         total_kv_pooling, ed_offset=0, is_funnel_layer=False):
+  """Returns a layer that based of queries and keys and a combined pool size
+     before in the funnel transformer computes positional embeddings for
+     relative attention calculations.
+
     Args:
-      - d_feature: Depth/dimensionality of feature embedding.
-      - separate_cls: True/False if we separate_cls in calculations.
-      - total_kv_pooling: Accumulated pool size of keys/values until this layer
+      d_feature: Depth/dimensionality of feature embedding.
+      separate_cls: True/False if we separate_cls in calculations.
+      total_q_pooling: Accumulated pool size of queries used at this layer
+      total_kv_pooling: Accumulated pool size of keys/values used at this layer
+      ed_offset: encoder decoder offset equals to
+        2 * original_decoder_len + 1 * original_encoder_length.
+      is_funnel_layer: Bool if this is funnel layer and we need to care about
+        positions in special case of cls token
     """
 
-  def PositionsVectors(queries, keys):
-    is_funnel_layer = queries.shape != keys.shape
-    keys_len, queries_len = keys.shape[1], queries.shape[1]
-    current_pooling_ratio = keys_len / queries_len
-
-    # Special case of upsampling
-    if is_funnel_layer and current_pooling_ratio < 1:
-      # We should not be doing standard upsampling when we use separate_cls
-      # Cls token is being used for classification
-      assert separate_cls is False
-      assert (total_kv_pooling * keys_len) % queries_len == 0
-      multiplier = ((total_kv_pooling * keys_len) // queries_len)
-      positions = jnp.arange(-queries_len + 1, queries_len, 1.0) * multiplier
-    else:
-      positions = jnp.arange(-keys_len + 1, keys_len, 1.0) * total_kv_pooling
+  def CalculatePositionalEmbeddings(queries, keys):
+    keys_len = keys.shape[1]
+    positions = jnp.arange(-keys_len + 1, keys_len, 1.0) * total_kv_pooling \
+                  + ed_offset
 
     if is_funnel_layer and separate_cls:
       # For pool_size 2 without separating cls we have got
@@ -315,22 +298,21 @@ def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
       # First group always will always consist of one token after pooling
       # instead of (pool_size) tokens. We need to add proper offset so
       # that our shift later on in calculating attention works properly
-      cls_offset = (current_pooling_ratio - 1) * total_kv_pooling
+      single_pooling_ratio = keys.shape[1] // queries.shape[1]
+      cls_offset = (single_pooling_ratio - 1) * total_kv_pooling
       positions = positions + cls_offset
 
-    return positions
+    return encode_sequence(positions)
 
-  def Sinusoidal_Embeddings(positions):
+  def encode_sequence(positions):
     inv_freq = 1 / (10000 ** (jnp.arange(0.0, d_feature, 2.0) / d_feature))
     sinusoid_freq = jnp.einsum('i,j->ij', positions, inv_freq)
     pos_emb = jnp.concatenate([jnp.sin(sinusoid_freq),
                               jnp.cos(sinusoid_freq)], axis=1)
     return pos_emb
 
-  return cb.Serial(
-      cb.Fn('Generate positions vectors', PositionsVectors, n_out=1),
-      cb.Fn('Transform to sinusoidal encodings', Sinusoidal_Embeddings, n_out=1)
-  )
+  return cb.Fn('Positional embeddings', CalculatePositionalEmbeddings,
+               n_out=1)
 
 
 def calc_funnel_ratio(keys_len, queries_len):
