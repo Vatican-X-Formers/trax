@@ -660,7 +660,6 @@ def FunnelTransformerLM(vocab_size,
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_pooling_acc),
-      tl.BatchNorm(axis=(0, 1)),
       ff_activation()
   )
 
