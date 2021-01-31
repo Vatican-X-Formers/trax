@@ -26,6 +26,7 @@ from trax.layers import core
 from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer
+from trax.models.research.configurable_transformer import FeedForwardWithOptions
 from trax.models.transformer import _EncoderBlock
 from trax.models.transformer import _FeedForwardBlock
 
@@ -530,8 +531,12 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       total_pooling, n_heads=n_heads, dropout=dropout,
       mode=mode)
 
-  feed_forward = _FeedForwardBlock(
-      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+  # feed_forward = _FeedForwardBlock(
+  #     d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+  feed_forward = FeedForwardWithOptions(
+      d_model, d_ff, dropout, dropout_shared_axes, ff_activation,
+      dropout, ff_chunk_size=0, ff_use_sru=(1, 64), ff_sparsity=0, mode=mode
+  )
 
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
