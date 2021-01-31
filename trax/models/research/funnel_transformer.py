@@ -683,6 +683,7 @@ def FunnelTransformerLM(vocab_size,
       tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
+      tl.SRU(d_model, ff_activation()),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
