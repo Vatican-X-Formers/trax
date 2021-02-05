@@ -270,6 +270,7 @@ class Loop:
     self._callbacks = [
         callback_class(self) for callback_class in callbacks
     ]
+    self._glob_eval_stats = collections.Counter()
 
   def _init_trainer(self, task):
     """Initializes the per-task trainer."""
@@ -657,12 +658,29 @@ class Loop:
       n_batches = eval_task.n_eval_batches
       n_metrics = len(eval_task.metrics)
       sums = np.zeros((n_metrics,))
+
+
+      def print_statistics_counter(cnt: collections.Counter):
+        vals_cnt = collections.Counter(cnt.values())
+        total = sum(cnt.values())
+        print(total, [cnt for _, cnt in cnt.most_common(20)],
+                     vals_cnt.most_common(20))
+
+      hashes = collections.Counter()
       for _ in range(n_batches):
         rng = self.new_rng()
         batch = eval_task.next_batch()
+        for example in batch[0]:
+          hashes[example.tobytes()] += 1
+
         metric_values, _ = evaluator.metrics_fn(
             batch, metrics_weights, metrics_state, rng)
         sums += metric_values
+
+      print_statistics_counter(hashes)
+      self._glob_eval_stats.update(hashes)
+      print_statistics_counter(self._glob_eval_stats)
+
       averages = sums / n_batches
       all_metrics = dict(zip(eval_task.metric_names, averages))
       summary_writer = summary_writers[eval_task_index]
