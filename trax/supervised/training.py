@@ -678,7 +678,7 @@ class Loop:
         metric_values, _ = evaluator.metrics_fn(
             batch, metrics_weights, metrics_state, rng)
         end = timer()
-        logging.info("batch time: {}", end - start)
+        logging.info("batch time: {}", str(end - start))
         sums += metric_values
 
       print_statistics_counter(hashes)
