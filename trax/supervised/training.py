@@ -42,6 +42,7 @@ import pickle
 import random
 import sys
 import time
+from timeit import default_timer as timer
 
 from absl import logging
 import gin
@@ -673,8 +674,11 @@ class Loop:
         for example in batch[0]:
           hashes[example.tobytes()] += 1
 
+        start = timer()
         metric_values, _ = evaluator.metrics_fn(
             batch, metrics_weights, metrics_state, rng)
+        end = timer()
+        logging.info("batch time: {}", end - start)
         sums += metric_values
 
       print_statistics_counter(hashes)
