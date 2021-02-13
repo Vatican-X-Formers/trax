@@ -466,12 +466,15 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
   post_ff = _FeedForwardBlock(
       d_model, d_ff // 2, dropout, dropout_shared_axes, mode, ff_activation)
 
+  halve = _Halve()
+
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
       tl.Residual(
-        pre_ff
+          pre_ff,
+          halve
       ),
       tl.Residual(               # vecs
           tl.LayerNorm(),
@@ -480,7 +483,8 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
           dropout_,
       ),                         # vecs
       tl.Residual(
-          post_ff
+          post_ff,
+          halve
       ),                         # vecs
   ]
 
@@ -499,6 +503,10 @@ def _DownsamplerLM(shorten_factor, d_model):
             x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
         tl.Dense(d_model)
     )
+
+
+def _Halve():
+  return tl.Fn('Halve', lambda x: x / 2, n_out=1)
 
 
 def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
@@ -543,6 +551,8 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   post_ff = _FeedForwardBlock(
       d_model, d_ff // 2, dropout, dropout_shared_axes, mode, ff_activation)
 
+  halve = _Halve()
+
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
@@ -553,7 +563,8 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
 
   return [
       tl.Residual(
-          pre_ff
+          pre_ff,
+          halve
       ),
       tl.LayerNorm(),            # h
       tl.Branch(tl.Serial(
@@ -567,7 +578,8 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
           dropout_,
       ),
       tl.Residual(
-          post_ff
+          post_ff,
+          halve
       ),
   ]
 
