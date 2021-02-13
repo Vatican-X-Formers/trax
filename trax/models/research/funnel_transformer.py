@@ -537,8 +537,11 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       total_pooling, n_heads=n_heads, dropout=dropout,
       mode=mode)
 
-  feed_forward = _FeedForwardBlock(
-      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+  pre_ff = _FeedForwardBlock(
+      d_model, d_ff // 2, dropout, dropout_shared_axes, mode, ff_activation)
+
+  post_ff = _FeedForwardBlock(
+      d_model, d_ff // 2, dropout, dropout_shared_axes, mode, ff_activation)
 
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
@@ -549,6 +552,9 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       if not is_upsampling else []
 
   return [
+      tl.Residual(
+          pre_ff
+      ),
       tl.LayerNorm(),            # h
       tl.Branch(tl.Serial(
           pooling,
@@ -561,7 +567,7 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
           dropout_,
       ),
       tl.Residual(
-          feed_forward
+          post_ff
       ),
   ]
 
