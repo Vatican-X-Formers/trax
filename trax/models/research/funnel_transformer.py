@@ -518,12 +518,15 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
         pass all values through unaltered.
     ff_activation: Type of activation function at the end of each block; must
         be an activation-type subclass of `Layer`.
+    shorten_factor: by how much shorten/upsample at this funnel block.
     resampler_fn: Type of function that performs funnel upsampling/downsampling;
-        must be an activation-type subclass of `Layer`.
+        callable with signature: shorten_factor, d_model;  must return an
+         activation-type subclass of `Layer`.
 
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
+  resampler = resampler_fn(shorten_factor, d_model)
 
   attention = RelativeAttentionLMLayer(
       d_model, context_bias_layer, location_bias_layer,
@@ -651,7 +654,7 @@ def FunnelTransformerLM(vocab_size,
         location_bias_layer=location_bias_layer,
         total_pooling=total_pooling_acc,
         shorten_factor=shorten_factor,
-        resampler_fn=_DownsamplerLM(shorten_factor, d_model))]
+        resampler_fn=_DownsamplerLM)]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
@@ -663,8 +666,8 @@ def FunnelTransformerLM(vocab_size,
       context_bias_layer=context_bias_layer,
       location_bias_layer=location_bias_layer,
       total_pooling=total_pooling_acc,
-      shorten_factor=None,
-      resampler_fn=_UpsamplerLM(total_pooling_acc, d_model))
+      shorten_factor=total_pooling_acc,
+      resampler_fn=_UpsamplerLM)
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_pooling_acc),
