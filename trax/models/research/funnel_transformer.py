@@ -536,12 +536,15 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
+  is_upsampling = total_pooling > 1
+
   return [
       tl.LayerNorm(),            # h
       tl.Branch(tl.Serial(
-          resampler_fn,
+          resampler_fn if not is_upsampling else [],
           tl.LayerNorm(),
       ), None),                  # h', h
+      tl.Select([2, 1, 2]) if is_upsampling else [],
       tl.Residual(
           tl.Select([0, 1, 1]),  # h', h, h
           attention,
