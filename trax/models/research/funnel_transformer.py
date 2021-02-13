@@ -526,8 +526,6 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
-  resampler = resampler_fn(shorten_factor, d_model)
-
   attention = RelativeAttentionLMLayer(
       d_model, context_bias_layer, location_bias_layer,
       total_pooling, n_heads=n_heads, dropout=dropout,
