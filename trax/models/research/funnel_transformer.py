@@ -667,11 +667,6 @@ def FunnelTransformerLM(vocab_size,
       shorten_factor=total_pooling_acc,
       resampler_fn=_UpsamplerLM)
 
-  conv_layer = tl.Serial(
-      tl.CausalConv(d_model, total_pooling_acc),
-      ff_activation()
-  )
-
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
 
   # Assemble and return the model.
@@ -686,7 +681,7 @@ def FunnelTransformerLM(vocab_size,
       upsampling_layer,
       tl.LayerNorm(),
       tl.Concatenate(),
-      conv_layer,
+      tl.Dense(d_model),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
