@@ -1390,6 +1390,22 @@ def random_spans_noise_mask(length,
   return is_noise[:orig_length]
 
 
+def detuplify():
+  def _f(generator):
+    for example in generator:
+      yield example[0]
+
+  return _f
+
+
+def tuplify():
+  def _f(generator):
+    for example in generator:
+      yield example,
+
+  return _f
+
+
 def generate_sequential_chunks(max_length=None):
   """Returns a function that generates chunks of atmost max_length length."""
   def _f(generator):
