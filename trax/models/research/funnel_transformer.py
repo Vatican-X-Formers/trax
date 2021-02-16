@@ -467,14 +467,14 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
-      tl.Residual(               # vecs
+      tl.ReversibleHalfResidual(               # vecs
           tl.LayerNorm(),
-          tl.Select([0, 0, 0]),
+          tl.ReversibleSelect([0, 0, 0]),
           attention,
           dropout_,
       ),                         # vecs
-      tl.Residual(
-          feed_forward
+      tl.ReversibleHalfResidual(
+          feed_forward,
       ),                         # vecs
   ]
 
@@ -631,7 +631,7 @@ def FunnelTransformerLM(vocab_size,
                               context_bias_layer, location_bias_layer,
                               total_pooling)
         for _ in range(n_layers)]
-    return decoder_blocks + [tl.LayerNorm()]
+    return decoder_blocks
 
   total_pooling_acc = 1
   pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
@@ -639,19 +639,19 @@ def FunnelTransformerLM(vocab_size,
 
   funnel_blocks = []
 
-  for shorten_factor, block_len in zip(shorten_factors, n_funnel_blocks):
-    funnel_blocks = funnel_blocks + [_FunnelRelativeDecoderBlock(
-        d_model, d_ff, n_heads, dropout,
-        dropout_shared_axes, mode,
-        ff_activation,
-        context_bias_layer=context_bias_layer,
-        location_bias_layer=location_bias_layer,
-        total_pooling=total_pooling_acc,
-        shorten_factor=shorten_factor,
-        resampler_fn=_DownsamplerLM)]
-    total_pooling_acc *= shorten_factor
-    funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
-                                                          total_pooling_acc)
+  # for shorten_factor, block_len in zip(shorten_factors, n_funnel_blocks):
+  shorten_factor, block_len = shorten_factors[0], n_funnel_blocks[0]
+  # funnel_blocks = funnel_blocks + [_FunnelRelativeDecoderBlock(
+  #     d_model, d_ff, n_heads, dropout,
+  #     dropout_shared_axes, mode,
+  #     ff_activation,
+  #     context_bias_layer=context_bias_layer,
+  #     location_bias_layer=location_bias_layer,
+  #     total_pooling=total_pooling_acc,
+  #     shorten_factor=shorten_factor,
+  #     resampler_fn=_DownsamplerLM)]
+  # total_pooling_acc *= shorten_factor
+  funnel_blocks = create_decoder_blocks(block_len,total_pooling_acc)
 
   upsampling_layer = _FunnelRelativeDecoderBlock(
       d_model, d_ff, n_heads, dropout,
@@ -674,15 +674,17 @@ def FunnelTransformerLM(vocab_size,
   return tl.Serial(              # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,             # vecs
-      pre_decoder_blocks,        # vecs
       tl.Dup(),
-      tl.ShiftRight(n_positions=total_pooling_acc - 1),
-      funnel_blocks,
-      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
-      upsampling_layer,
-      tl.LayerNorm(),
+      tl.ReversibleSerial(funnel_blocks),
       tl.Concatenate(),
-      conv_layer,
-      post_decoder_blocks,
+      # pre_decoder_blocks,        # vecs
+      # tl.Dup(),
+      # tl.ShiftRight(n_positions=total_pooling_acc - 1),
+      # # tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
+      # # upsampling_layer,
+      # tl.LayerNorm(),
+      # tl.Concatenate(),
+      # conv_layer,
+      # post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
