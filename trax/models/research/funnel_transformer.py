@@ -627,7 +627,7 @@ def FunnelTransformerLM(vocab_size,
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
-  def create_decoder_blocks(n_layers, total_pooling):
+  def create_decoder_blocks(n_layers, total_pooling, end_with_ln=True):
     decoder_blocks = [
         # pylint: disable=g-complex-comprehension
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
@@ -635,6 +635,8 @@ def FunnelTransformerLM(vocab_size,
                               context_bias_layer, location_bias_layer,
                               total_pooling)
         for _ in range(n_layers)]
+    if not end_with_ln:
+      return decoder_blocks
     return decoder_blocks + [tl.LayerNorm()]
 
   total_pooling_acc = 1
@@ -655,7 +657,8 @@ def FunnelTransformerLM(vocab_size,
         resampler_fn=_DownsamplerLM)]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
-                                                          total_pooling_acc)
+                                                          total_pooling_acc,
+                                                          end_with_ln=False)
 
   upsampling_layer = _FunnelRelativeDecoderBlock(
       d_model, d_ff, n_heads, dropout,
