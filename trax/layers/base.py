@@ -19,7 +19,7 @@
 import copy
 import gzip
 import inspect
-import pickle
+import pickle5 as pickle
 import random
 import traceback
 
