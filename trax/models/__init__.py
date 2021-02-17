@@ -94,3 +94,5 @@ FunnelTransformer = model_configure(
 ResidualShuffleExchange = model_configure(rse.ResidualShuffleExchange)
 FunnelTransformerLM = model_configure(
     funnel_transformer.FunnelTransformerLM)
+AFunnel = model_configure(
+    funnel_transformer.AFunnel)

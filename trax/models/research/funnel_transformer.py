@@ -556,13 +556,15 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   ]
 
 
-  def create_decoder_blocks(n_layers, total_pooling):
+def create_decoder_blocks(n_layers, total_pooling, d_model, d_ff, n_heads, dropout,
+                                dropout_shared_axes, mode, ff_activation,
+                                context_bias_layer, location_bias_layer):
     decoder_blocks = [
         # pylint: disable=g-complex-comprehension
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
-                              dropout_shared_axes, mode, ff_activation,
-                              context_bias_layer, location_bias_layer,
-                              total_pooling)
+                                dropout_shared_axes, mode, ff_activation,
+                                context_bias_layer, location_bias_layer,
+                                total_pooling)
         for _ in range(n_layers)]
     return decoder_blocks + [tl.LayerNorm()]
 
@@ -663,6 +665,7 @@ def FunnelTransformerLM(vocab_size,
       shorten_factor=total_pooling_acc,
       resampler_fn=_UpsamplerLM)
 
+
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_pooling_acc),
       ff_activation()
@@ -696,13 +699,11 @@ def AFunnel(vocab_size,
             narrow_segment_lengths=(2,2),
             shorten_factor=3,
             n_heads=8,
-            max_len=2048,
             dropout=0.1,
             dropout_shared_axes=None,
             mode='train',
-            ff_activation=tl.Relu,
-            use_conv=True):
-    assert len(wide_segment_lengths) > 2
+            ff_activation=tl.FastGelu):
+    assert len(wide_segment_lengths) >= 2
     assert len(narrow_segment_lengths) == len(wide_segment_lengths) - 1
 
     positional_encoder = [
@@ -710,19 +711,48 @@ def AFunnel(vocab_size,
         tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
     _channels = 1 # [r0][g0][b0][r1][g1]...
-    context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model, n_heads)
+    context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model, n_heads)
 
     input_len = wide_segment_lengths[0]
     wide_segment_lengths = wide_segment_lengths[1:]
 
-    afunnel_core = create_decoder_blocks(input_len, 1)
+    afunnel_core = create_decoder_blocks(input_len, 1, d_model, d_ff, n_heads, dropout,
+                                dropout_shared_axes, mode, ff_activation,
+                                context_bias_layer, location_bias_layer )
     for n_narrow, n_wide in zip(narrow_segment_lengths, wide_segment_lengths):
-        wide = create_decoder_blocks(n_wide, 1)
-        narrow = create_decoder_blocks(n_narrow, shorten_factor)
+        wide = create_decoder_blocks(n_wide, 1, d_model, d_ff, n_heads, dropout,
+                                dropout_shared_axes, mode, ff_activation,
+                                context_bias_layer, location_bias_layer)
+        narrow = create_decoder_blocks(n_narrow, shorten_factor, d_model, d_ff, n_heads, dropout,
+                                dropout_shared_axes, mode, ff_activation,
+                                context_bias_layer, location_bias_layer)
+
+        upsampling_layer = _FunnelRelativeDecoderBlock(
+            d_model, d_ff, n_heads, dropout,
+            dropout_shared_axes, mode,
+            ff_activation,
+            context_bias_layer=context_bias_layer,
+            location_bias_layer=location_bias_layer,
+            total_pooling=shorten_factor,
+            shorten_factor=shorten_factor,
+            resampler_fn=_UpsamplerLM)
+
+        funnel_block = _FunnelRelativeDecoderBlock(
+            d_model, d_ff, n_heads, dropout,
+            dropout_shared_axes, mode,
+            ff_activation,
+            context_bias_layer=context_bias_layer,
+            location_bias_layer=location_bias_layer,
+            total_pooling=shorten_factor,
+            shorten_factor=shorten_factor,
+            resampler_fn=_DownsamplerLM)
+
         afunnel_core = [
             *afunnel_core,
             tl.Residual(
-                narrow
+                funnel_block,
+                narrow,
+                upsampling_layer,
             ),
             wide
         ]
