@@ -487,6 +487,14 @@ def _UpsamplerLM(shorten_factor, d_model):
     )
 
 
+def _PadToLength(shorten_factor):
+  return tl.Fn('PadToLength', lambda x: jnp.pad(
+      x,
+      ((0, 0), (0, -(x.shape[
+                       1] - shorten_factor) % shorten_factor))
+  ))
+
+
 def _DownsamplerLM(shorten_factor, d_model):
   return tl.Serial(
         tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
@@ -672,6 +680,7 @@ def FunnelTransformerLM(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
+      _PadToLength(total_pooling_acc),
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,             # vecs
       pre_decoder_blocks,        # vecs
