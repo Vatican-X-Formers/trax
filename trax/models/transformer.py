@@ -86,17 +86,17 @@ def TransformerEncoder(vocab_size,
       for i in range(n_layers)]
 
   # Assemble and return the model.
-  return tl.Serial(                               # toks
+  return tl.Serial(  # toks
       # Encode.
       tl.Branch(
           positional_encoder, tl.PaddingMask()),  # vecs masks
-      encoder_blocks,                             # vecs masks
-      tl.Select([0], n_in=2),                     # vecs
-      tl.LayerNorm(),                             # vecs
+      encoder_blocks,  # vecs masks
+      tl.Select([0], n_in=2),  # vecs
+      tl.LayerNorm(),  # vecs
 
       # Map to output categories.
-      tl.Mean(axis=1),                            # vecs
-      tl.Dense(n_classes),                        # vecs
+      tl.Mean(axis=1),  # vecs
+      tl.Dense(n_classes),  # vecs
   )
 
 
@@ -172,10 +172,10 @@ def TransformerDecoder(vocab_size=None,
       for i in range(n_layers)]
 
   # Assemble and return the model.
-  return tl.Serial(        # toks
+  return tl.Serial(  # toks
       positional_encoder,  # vecs
-      decoder_blocks,      # vecs
-      tl.LayerNorm(),      # vecs
+      decoder_blocks,  # vecs
+      tl.LayerNorm(),  # vecs
   )
 
 
@@ -243,12 +243,14 @@ def TransformerLM(vocab_size,
       for i in range(n_layers)]
 
   # Assemble and return the model.
-  return tl.Serial(              # tokens (or chunked tuple of tokens)
+  return tl.Serial(  # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
-      positional_encoder,        # vecs
-      decoder_blocks,            # vecs
-      tl.LayerNorm(),            # vecs
-      tl.Dense(vocab_size),      # vecs
+      positional_encoder,  # vecs
+      tl.Dup(),
+      tl.ReversibleSerial(decoder_blocks),  # vecs
+      tl.Concatenate(),
+      tl.LayerNorm(),  # vecs
+      tl.Dense(vocab_size),  # vecs
   )
 
 
@@ -319,6 +321,7 @@ def Transformer(input_vocab_size,
     A Transformer model as a layer that maps from a source-target tokenized
     text pair to activations over a vocab set.
   """
+
   def Embedder(vocab_size):  # tokens --> vectors
     return [
         tl.Embedding(vocab_size, d_model),
@@ -364,24 +367,24 @@ def Transformer(input_vocab_size,
   return tl.Serial(
       # Input: encoder_side_tokens, decoder_side_tokens
       # Copy decoder tokens for use in loss.
-      tl.Select([0, 1, 1]),               # tok_e tok_d tok_d
+      tl.Select([0, 1, 1]),  # tok_e tok_d tok_d
 
       # Encode.
-      tl.Branch([], tl.PaddingMask()),    # tok_e masks ..... .....
-      encoder,                            # vec_e ..... ..... .....
+      tl.Branch([], tl.PaddingMask()),  # tok_e masks ..... .....
+      encoder,  # vec_e ..... ..... .....
 
       # Decode.
-      tl.Select([2, 1, 0]),               # tok_d masks vec_e .....
-      tl.ShiftRight(mode=mode),           # tok_d ..... ..... .....
-      out_encoder,                        # vec_d ..... ..... .....
+      tl.Select([2, 1, 0]),  # tok_d masks vec_e .....
+      tl.ShiftRight(mode=mode),  # tok_d ..... ..... .....
+      out_encoder,  # vec_d ..... ..... .....
       tl.Branch(
-          [], tl.EncoderDecoderMask()),   # vec_d masks ..... .....
-      encoder_decoder_blocks,             # vec_d masks ..... .....
-      tl.LayerNorm(),                     # vec_d ..... ..... .....
+          [], tl.EncoderDecoderMask()),  # vec_d masks ..... .....
+      encoder_decoder_blocks,  # vec_d masks ..... .....
+      tl.LayerNorm(),  # vec_d ..... ..... .....
 
       # Map to output vocab.
-      tl.Select([0], n_in=3),             # vec_d tok_d
-      tl.Dense(output_vocab_size),        # vec_d .....
+      tl.Select([0], n_in=3),  # vec_d tok_d
+      tl.Dense(output_vocab_size),  # vec_d .....
   )
 
 
@@ -458,22 +461,20 @@ def _DecoderBlock(d_model, d_ff, n_heads,
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
-  causal_attention = tl.CausalAttention(
-      d_model, n_heads=n_heads, dropout=dropout, mode=mode),
+  attn = tl.SelfAttention(d_qk=d_model, d_v=d_model, n_heads=n_heads, mode=mode,
+                          causal=True, output_dropout=dropout,
+                          attention_dropout=dropout)
 
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
 
-  dropout_ = tl.Dropout(
-      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
-
   return [
-      tl.Residual(
+      tl.ReversibleHalfResidual(
           tl.LayerNorm(),
-          causal_attention,
-          dropout_,
+          attention_layer=attn,
       ),
-      tl.Residual(
+      tl.ReversibleSwap(),
+      tl.ReversibleHalfResidual(
           feed_forward
       ),
   ]
@@ -507,6 +508,7 @@ def _EncoderDecoderBlock(d_model, d_ff, n_heads,
     A list of layers which maps triples (decoder_activations, mask,
     encoder_activations) to triples of the same sort.
   """
+
   def _Dropout():
     return tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
@@ -573,4 +575,3 @@ def _FeedForwardBlock(d_model, d_ff, dropout, dropout_shared_axes,
       tl.Dense(d_model),
       dropout_final,
   ]
-
