@@ -661,11 +661,9 @@ def FunnelTransformerLM(vocab_size,
       tl.Dup(),
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
       funnel_blocks,
-      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       upsampling_layer,
       tl.LayerNorm(),
-      tl.Concatenate(),
-      tl.Dense(d_model),
+      tl.Add(),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
