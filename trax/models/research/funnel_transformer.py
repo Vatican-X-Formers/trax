@@ -479,22 +479,6 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
   ]
 
 
-def _UpsamplerLM(shorten_factor, d_model):
-  return tl.Serial(
-        tl.Dense(shorten_factor * d_model),
-        tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
-            x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
-    )
-
-
-def _DownsamplerLM(shorten_factor, d_model):
-  return tl.Serial(
-        tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
-            x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
-        tl.Dense(d_model)
-    )
-
-
 def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes, mode, ff_activation,
                                 context_bias_layer, location_bias_layer,
@@ -652,7 +636,7 @@ def FunnelTransformerLM(vocab_size,
         location_bias_layer=location_bias_layer,
         total_pooling=total_pooling_acc,
         shorten_factor=shorten_factor,
-        resampler_fn=_DownsamplerLM)]
+        resampler_fn=None)]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
@@ -665,7 +649,7 @@ def FunnelTransformerLM(vocab_size,
       location_bias_layer=location_bias_layer,
       total_pooling=total_pooling_acc,
       shorten_factor=total_pooling_acc,
-      resampler_fn=_UpsamplerLM)
+      resampler_fn=None)
 
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
 
