@@ -750,6 +750,7 @@ def AFunnel(vocab_size,
         afunnel_core = [
             *afunnel_core,
             tl.Residual(
+                tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
                 funnel_block,
                 narrow,
                 upsampling_layer,
