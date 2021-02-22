@@ -641,15 +641,19 @@ def FunnelTransformerLM(vocab_size,
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
 
-  upsampling_layer = _FunnelRelativeDecoderBlock(
-      d_model, d_ff, n_heads, dropout,
-      dropout_shared_axes, mode,
-      ff_activation,
-      context_bias_layer=context_bias_layer,
-      location_bias_layer=location_bias_layer,
-      total_pooling=total_pooling_acc,
-      shorten_factor=total_pooling_acc,
-      resampler_fn=None)
+  upsampling_layers = []
+  reverse_pooling_acc = total_pooling_acc
+  for upsampling_factor in shorten_factors[::-1]:
+    upsampling_layers += _FunnelRelativeDecoderBlock(
+        d_model, d_ff, n_heads, dropout,
+        dropout_shared_axes, mode,
+        ff_activation,
+        context_bias_layer=context_bias_layer,
+        location_bias_layer=location_bias_layer,
+        total_pooling=reverse_pooling_acc,
+        shorten_factor=upsampling_factor,
+        resampler_fn=None)
+    reverse_pooling_acc //= upsampling_factor
 
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
 
@@ -661,7 +665,7 @@ def FunnelTransformerLM(vocab_size,
       tl.Dup(),
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
       funnel_blocks,
-      upsampling_layer,
+      upsampling_layers,
       tl.Select([0], n_in=2),
       tl.LayerNorm(),
       post_decoder_blocks,
