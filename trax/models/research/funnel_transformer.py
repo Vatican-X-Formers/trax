@@ -546,6 +546,7 @@ def FunnelTransformerLM(vocab_size,
                         d_model=512,
                         d_ff=2048,
                         vanilla_layers=(0, 1),
+                        n_mid_decoder_blocks=3,
                         shorten_factors=(3,),
                         n_funnel_blocks=(6,),
                         n_heads=8,
@@ -639,6 +640,8 @@ def FunnelTransformerLM(vocab_size,
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
 
+  mid_decoder_blocks = create_decoder_blocks(n_mid_decoder_blocks, 1)
+
   upsampling_layer = _FunnelRelativeDecoderBlock(
       d_model, d_ff, n_heads, dropout,
       dropout_shared_axes, mode,
@@ -656,11 +659,14 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,             # vecs
       pre_decoder_blocks,        # vecs
-      tl.Dup(),
-      tl.ShiftRight(n_positions=total_pooling_acc - 1),
-      funnel_blocks,
+      tl.Branch(
+          tl.Serial(
+            tl.ShiftRight(n_positions=total_pooling_acc - 1),
+            funnel_blocks,
+          ),
+          mid_decoder_blocks,
+      ),
       upsampling_layer,
-      tl.LayerNorm(),
       tl.Add(),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
