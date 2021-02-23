@@ -667,7 +667,7 @@ def FunnelTransformerLM(vocab_size,
           mid_decoder_blocks,
       ),
       upsampling_layer,
-      tl.Add(),
+      tl.Select([0], n_in=2),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
