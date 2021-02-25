@@ -335,7 +335,7 @@ def _fast_matrix_shift(x, funnel_factor, is_upsampling=False):
   return x
 
 
-@assert_shape('bqd,bkd,bvd->bqd,bkd,bvd,b1qk')
+@assert_shape('bqe,bkd,bvd->bqe,bkd,bvd,b1qk')
 def CreateAttentionMaskLayer():
   """Returns a layer that based on queries, keys and accumulated pool size of
      keys/values until this layer calculates positional embeddings for
