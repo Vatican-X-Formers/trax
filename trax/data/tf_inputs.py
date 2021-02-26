@@ -626,7 +626,7 @@ def cifar10_augmentation_flatten_preprocess(dataset,
 
 
 @gin.configurable(denylist=['dataset', 'training'])
-def downsampled_imagenet_flatten_bare_preprocess(dataset, training):
+def downsampled_imagenet_flatten_bare_preprocess(dataset, training, size=32):
   """Preprocessing for downsampled_imagenet.
 
   Args:
@@ -643,6 +643,7 @@ def downsampled_imagenet_flatten_bare_preprocess(dataset, training):
 
   def flatten_image(features):
     img = features['image']
+    img = tf.image.resize_with_crop_or_pad(img, size, size)
     flat = tf.cast(tf.reshape(img, [-1]), tf.int64)
 
     new_features = {'image': flat}
