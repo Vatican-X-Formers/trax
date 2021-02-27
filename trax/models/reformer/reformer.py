@@ -303,13 +303,12 @@ def ReformerShortenLM(vocab_size,
       tl.Select([0], n_in=2),
       tl.LayerNorm(),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
-      tl.Dense(shorten_factor * d_embedding),
+      tl.Dense(shorten_factor * d_model),
       tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
           x, (x.shape[0], x.shape[1] * shorten_factor, -1)), n_out=1),
       tl.Concatenate(),  # Concatenate with just the embeddings.
-      tl.CausalConv(d_embedding),
-      tl.Relu(),
-      tl.SRU(d_embedding),  # One RNN layer for conditional dependence.
+      tl.CausalConv(d_model),
+      ff_activation(),
       tl.Dense(vocab_size),
   )
   # pylint: enable=g-long-lambda
