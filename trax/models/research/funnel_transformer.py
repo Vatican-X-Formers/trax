@@ -525,17 +525,24 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       if not is_upsampling else []
 
   return [
-      tl.LayerNorm(),            # h
       tl.Branch(tl.Serial(
           pooling,
           tl.LayerNorm(),
       ), None),                  # h', h
       tl.Select([2, 1, 2]) if is_upsampling else [],
-      tl.Residual(
-          tl.Select([0, 1, 1]),  # h', h, h
-          attention,
-          dropout_,
+      tl.Select([0, 1, 1, 1]),  # h', h, h, h
+      attention,
+      dropout_,
+      tl.Parallel(None,
+        tl.Fn('ProlongBack', lambda x: jnp.reshape(  # Prolong back.
+            x, (x.shape[0],
+                x.shape[1] * shorten_factor if is_upsampling else x.shape[
+                                                                    1] // shorten_factor,
+                -1))
+              , n_out=1)
       ),
+      tl.Concatenate(),
+      tl.Dense(d_model),
       tl.Residual(
           feed_forward
       ),
