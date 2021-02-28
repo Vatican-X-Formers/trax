@@ -252,7 +252,8 @@ def ReformerShortenLM(vocab_size,
   assert mode != 'predict'  # TODO(lukaszkaiser,kitaev): fast inference
 
   positional_encoding = ct.PositionalEncoder(
-      mode, dropout, max_len, pos_type, pos_axial_shape, pos_d_axial_embs)
+      mode, dropout, max_len // shorten_factor,
+      pos_type, pos_axial_shape, pos_d_axial_embs)
 
   embedder = [
       tl.Embedding(vocab_size, d_embedding),
