@@ -254,9 +254,12 @@ def ReformerShortenLM(vocab_size,
   positional_encoding = ct.PositionalEncoder(
       mode, dropout, max_len, pos_type, pos_axial_shape, pos_d_axial_embs)
 
-  positional_embedder = [
+  embedder = [
       tl.Embedding(vocab_size, d_embedding),
-      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
+      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
+  ]
+
+  positional_encoder = [
       positional_encoding,
   ]
 
@@ -284,7 +287,7 @@ def ReformerShortenLM(vocab_size,
   # pylint: disable=g-long-lambda
   return tl.Serial(
       tl.ShiftRight(),
-      positional_embedder,
+      embedder,
       tl.Dup(),              # Stack has (x, x), the first will be shortened
       # Before shortening, we need to pad by shorten factor so as not to leak
       # information into the future. To understand why, imagine shorten factor
@@ -298,6 +301,7 @@ def ReformerShortenLM(vocab_size,
       tl.Fn('Shorten', lambda x: jnp.reshape(  # Shorten -- move to depth.
           x, (x.shape[0], x.shape[1] // shorten_factor, -1)), n_out=1),
       tl.Dense(d_model),
+      positional_encoder,
       tl.Dup(),  # Stack has (short_x, short_x, x)
       tl.ReversibleSerial(decoder_blocks),
       tl.Select([0], n_in=2),
