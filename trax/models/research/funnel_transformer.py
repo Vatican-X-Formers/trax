@@ -718,7 +718,7 @@ def AFunnel(vocab_size,
 
     afunnel_core = create_decoder_blocks(input_len, 1, d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes, mode, ff_activation,
-                                context_bias_layer, location_bias_layer )
+                                context_bias_layer, location_bias_layer)
     for n_narrow, n_wide in zip(narrow_segment_lengths, wide_segment_lengths):
         wide = create_decoder_blocks(n_wide, 1, d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes, mode, ff_activation,
@@ -748,7 +748,7 @@ def AFunnel(vocab_size,
             resampler_fn=_DownsamplerLM)
 
         afunnel_core = [
-            *afunnel_core,
+            afunnel_core,
             tl.Residual(
                 tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
                 funnel_block,
