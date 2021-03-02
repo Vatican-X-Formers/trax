@@ -635,7 +635,7 @@ def FunnelTransformerLM(vocab_size,
 
   total_pooling_acc = 1
   pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
-                                             total_pooling_acc)
+                                             total_pooling=1)
 
   funnel_blocks = []
 
