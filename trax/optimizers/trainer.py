@@ -162,7 +162,7 @@ def _average_multidevice_gradients(gradients):
 def _accelerate_update_fn(forward_and_backward_fn,
                           optimizer,
                           n_devices,
-                          accelerate=True):
+                          accelerate=False):
   """Accelerates the given forward_and_backward_fn function."""
   if n_devices == 1:
     def single_device_update_fn(
@@ -171,6 +171,13 @@ def _accelerate_update_fn(forward_and_backward_fn,
       weights, slots = weights_and_slots
       (loss, state), gradients = forward_and_backward_fn(
           batch, weights, state, rng)
+      from jax.experimental.host_callback import id_print, id_tap
+      id_print(gradients[0])
+      filtered_grads = fastmath.nested_map(lambda x:
+                                           jnp.where(x > 5, x, 0.),
+                                           gradients[0])
+      id_print(filtered_grads)
+
       weights, slots, stats = optimizer.tree_update(
           step, gradients, weights, slots, opt_params, store_slots=False)
       stats['loss'] = loss
