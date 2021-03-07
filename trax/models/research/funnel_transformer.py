@@ -26,8 +26,9 @@ from trax.layers import core
 from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer
+from trax.models.research.configurable_transformer import FeedForwardWithOptions
 from trax.models.transformer import _EncoderBlock
-from trax.models.transformer import _FeedForwardBlock
+# from trax.models.transformer import _FeedForwardBlock
 
 
 @assert_shape('bld->bSd')
@@ -424,6 +425,16 @@ def _get_rel_att_inputs(d_model, n_heads):
   location_bias_layer = core.Weights(bias_initializer,
                                      shape=(1, n_heads, 1, d_head))
   return context_bias_layer, location_bias_layer
+
+
+def _FeedForwardBlock(d_model, d_ff, dropout, dropout_shared_axes, mode,
+                      ff_activation):
+  return FeedForwardWithOptions(d_model, d_ff, dropout, dropout_shared_axes,
+                                ff_activation, dropout,
+                                ff_chunk_size=128,
+                                ff_use_sru=False,
+                                ff_sparsity=0,
+                                mode=mode,)
 
 
 def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
