@@ -653,28 +653,11 @@ def FunnelTransformerLM(vocab_size,
   funnel_blocks = []
 
   for shorten_factor, block_len in zip(shorten_factors, n_funnel_blocks):
-    funnel_blocks = funnel_blocks + [_FunnelRelativeDecoderBlock(
-        d_model, d_ff, n_heads, dropout,
-        dropout_shared_axes, mode,
-        ff_activation,
-        context_bias_layer=context_bias_layer,
-        location_bias_layer=location_bias_layer,
-        total_pooling=total_pooling_acc,
-        shorten_factor=shorten_factor,
-        resampler_fn=_DownsamplerLM)]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
 
-  upsampling_layer = _FunnelRelativeDecoderBlock(
-      d_model, d_ff, n_heads, dropout,
-      dropout_shared_axes, mode,
-      ff_activation,
-      context_bias_layer=context_bias_layer,
-      location_bias_layer=location_bias_layer,
-      total_pooling=total_pooling_acc,
-      shorten_factor=total_pooling_acc,
-      resampler_fn=_UpsamplerLM)
+  upsampling_layer = _UpsamplerLM(total_pooling_acc, d_model)
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, total_pooling_acc),
@@ -691,6 +674,7 @@ def FunnelTransformerLM(vocab_size,
       pre_decoder_blocks,        # vecs
       tl.Dup(),
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
+      _DownsamplerLM(total_pooling_acc, d_model),
       funnel_blocks,
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       upsampling_layer,
