@@ -26,9 +26,10 @@ from trax.layers import core
 from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer
+from trax.models.research.configurable_transformer import PositionalEncoder
 from trax.models.transformer import _EncoderBlock
 from trax.models.transformer import _FeedForwardBlock
-
+from trax.models.reformer.reformer import DecoderBlock
 
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
@@ -578,6 +579,9 @@ def FunnelTransformerLM(vocab_size,
                         n_heads=8,
                         dropout=0.1,
                         dropout_shared_axes=None,
+                        attn_type=tl.LSHSelfAttention,
+                        pos_type='fixed-base',
+                        max_len=3072,
                         mode='train',
                         ff_activation=tl.FastGelu):
   """Returns a Transformer language model.
@@ -631,6 +635,9 @@ def FunnelTransformerLM(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
+  positional_encoder = PositionalEncoder(
+      mode, dropout, max_len, pos_type) if pos_type is not None else []
+
   context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
                                                                 n_heads)
 
@@ -646,9 +653,31 @@ def FunnelTransformerLM(vocab_size,
         for _ in range(n_layers)]
     return decoder_blocks + [tl.LayerNorm()]
 
+  def create_reformer_blocks(n_layers, dense=True):
+    if n_layers == 0:
+      return [tl.LayerNorm()]
+    d_per_head = d_model // n_heads
+    decoder_blocks = [
+        DecoderBlock(d_model, d_ff, d_per_head, d_per_head, n_heads,
+                     attn_type,
+                     dropout, ff_activation, dropout,
+                     ff_use_sru=0,
+                     ff_chunk_size=0,
+                     ff_sparsity=0,
+                     attention_chunk_size=0,
+                     mode=mode)
+        for _ in range(n_layers)]
+
+    return [
+        tl.Dup(),
+        tl.ReversibleSerial(decoder_blocks),
+        tl.Concatenate(),
+        tl.LayerNorm(),
+        tl.Dense(d_model) if dense else [],
+    ]
+
   total_pooling_acc = 1
-  pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
-                                             total_pooling=1)
+  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks, dense=True)
 
   funnel_blocks = []
 
@@ -664,13 +693,14 @@ def FunnelTransformerLM(vocab_size,
       ff_activation()
   )
 
-  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
-                                              total_pooling=1)
+  post_decoder_blocks = create_reformer_blocks(n_post_decoder_blocks,
+                                               dense=False)
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,             # vecs
+      positional_encoder,
       pre_decoder_blocks,        # vecs
       tl.Dup(),
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
