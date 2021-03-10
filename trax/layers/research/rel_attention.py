@@ -298,7 +298,7 @@ def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
   def PositionsVectors(queries, keys):
     keys_len, queries_len = keys.shape[1], queries.shape[1]
 
-    positions = jnp.arange(-keys_len + 1, keys_len, 1.0) * total_kv_pooling
+    positions = jnp.arange(-keys_len + 1, keys_len, 1.0)
 
     return positions
 
