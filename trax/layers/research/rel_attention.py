@@ -254,8 +254,8 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
   """
   d_feature = queries.shape[-1]
 
-  ac = jnp.einsum('bnid,bnjd->bnij', queries + context_bias, keys)
-  bd = jnp.einsum('bnid,jnd->bnij', queries + location_bias, pos_emb)
+  ac = jnp.einsum('bnid,bnjd->bnij', queries, keys)
+  bd = jnp.einsum('bnid,jnd->bnij', queries, pos_emb)
   bd = _fast_matrix_shift(bd)
 
   if separate_cls:
