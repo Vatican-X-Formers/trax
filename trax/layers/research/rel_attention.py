@@ -93,15 +93,15 @@ def RelativeAttentionLayer(d_feature,
   return cb.Serial(
       cb.Branch(
           PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
+          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
           cb.Select([0]), cb.Select([1])),
       cb.Parallel(
           core.Dense(d_feature),
           core.Dense(d_feature),
           core.Dense(d_feature),
           core.Dense(d_feature),
+          core.Dense(d_feature),
       ),
-      context_bias_layer,
-      location_bias_layer,
       RelativeAttention(  # pylint: disable=no-value-for-parameter
           separate_cls=separate_cls,
           n_heads=n_heads,
@@ -184,7 +184,7 @@ class RelativeAttention(base.Layer):
         (based on query-key pairs) before applying them to values.
       mode: One of `'train'`, `'eval'`, or `'predict'`.
     """
-    super().__init__(n_in=7, n_out=2)
+    super().__init__(n_in=6, n_out=2)
     self._separate_cls = separate_cls
     self._n_heads = n_heads
     self._dropout = dropout
@@ -196,7 +196,7 @@ class RelativeAttention(base.Layer):
     Args:
       inputs: A (location_bias, context_bias, pos_emb, q, k, v, mask) tuple.
     """
-    location_bias, context_bias, pos_emb, q, k, v, mask = inputs
+    l_emb, r_emb, q, k, v, mask = inputs
 
     d_feature = q.shape[-1]
     n_heads = self._n_heads
@@ -209,10 +209,9 @@ class RelativeAttention(base.Layer):
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(q),
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(k),
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(v),
-        pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
-        context_bias,
-        location_bias,
-        mask,
+        l_emb.reshape((-1, n_heads, d_feature // n_heads)),
+        r_emb.reshape((-1, n_heads, d_feature // n_heads)),
+        mask=mask,
         separate_cls=self._separate_cls,
         dropout=self._dropout,
         mode=self._mode,
@@ -224,8 +223,7 @@ class RelativeAttention(base.Layer):
     return merged_results, mask
 
 
-def DotProductAttention(queries, keys, values, pos_emb, context_bias,
-                        location_bias, mask, separate_cls, dropout, mode, rng):
+def DotProductAttention(queries, keys, values, l_emb, r_emb, mask, separate_cls, dropout, mode, rng):
   """Computes new activations via masked attention-weighted sum of values.
 
   This function is the core of the attention mechanism. It:
@@ -238,9 +236,6 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     queries: Per-head activations representing attention queries.
     keys: Per-head activations representing attention keys.
     values: Per-head activations to be combined by computed attention weights.
-    pos_emb: Per-head activations representing positional embeddings.
-    context_bias: Global context bias from Transformer XL's attention.
-    location_bias: Global location bias from Transformer XL's attention.
     mask: Mask that distinguishes positions with real content vs. padding.
     separate_cls: True/False if we separate_cls in calculations.
     dropout: Probabilistic rate for dropout applied to attention strengths
@@ -255,8 +250,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
   d_feature = queries.shape[-1]
 
   ac = jnp.einsum('bnid,bnjd->bnij', queries, keys)
-  bd = jnp.einsum('bnid,jnd->bnij', queries, pos_emb)
-  bd = _fast_matrix_shift(bd)
+  bd = jnp.einsum('bnid,jnd->bnij', queries + l_emb.swapaxes(0, 1), r_emb)
 
   if separate_cls:
     # Masking out location part of attention for cls token
@@ -298,7 +292,7 @@ def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
   def PositionsVectors(queries, keys):
     keys_len, queries_len = keys.shape[1], queries.shape[1]
 
-    positions = jnp.arange(-keys_len + 1, keys_len, 1.0) * total_kv_pooling
+    positions = jnp.arange(0, queries_len, 1.0)
 
     return positions
 
@@ -339,8 +333,6 @@ def _fast_matrix_shift(x):
 
   Args:
     x: matrix.
-    funnel_factor: factor to be used for shift.
-    is_upsampling: determines whether perform upsampling.
 
   Returns:
     Shifted matrix x.
@@ -384,11 +376,9 @@ def CreateAttentionMaskLayer():
     keys_len, queries_len = keys.shape[-2], queries.shape[-2]
     funnel_factor, is_upsampling = calc_funnel_ratio(keys_len, queries_len)
 
-    return _funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
-                        is_upsampling)
+    return _funnel_mask(batch_size, queries_len)
 
-  def _funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
-                   is_upsampling):
+  def _funnel_mask(batch_size, queries_len):
     """Creates a funnel mask.
 
     This function based on keys/queries lengths creates a triangle mask
@@ -404,10 +394,7 @@ def CreateAttentionMaskLayer():
 
     Args:
       batch_size: batch size.
-      keys_len: keys length.
       queries_len: queries length.
-      funnel_factor: funnel factor.
-      is_upsampling: upsampling if set to True.
 
     Returns:
       Funnel mask.
