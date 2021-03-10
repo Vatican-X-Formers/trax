@@ -179,6 +179,5 @@ class FunnelTransformerTest(parameterized.TestCase):
         self.assertEqual(y_2.shape[0], input_shape[1])
         np.testing.assert_array_almost_equal(y_1[:i+1], y_2[:i+1])
 
-
 if __name__ == '__main__':
   absltest.main()

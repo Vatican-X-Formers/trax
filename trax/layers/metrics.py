@@ -220,6 +220,40 @@ def WeightedCategoryCrossEntropy(label_smoothing=None):
   return base.Fn('WeightedCategoryCrossEntropy', f)
 
 
+def WeightedCategoryCrossEntropyCls(label_smoothing=None):
+  r"""Returns a layer like ``CategoryCrossEntropy``, with weights as third input.
+
+  The layer takes three inputs:
+
+    - A batch of activation vectors. The components in a given vector should
+      be pre-softmax activations (mappable to a probability distribution via
+      softmax). For performance reasons, the softmax and cross-entropy
+      computations are combined inside the layer.
+
+    - A batch of target categories; each target is an integer in
+      :math:`\{0, ..., N-1\}`, where :math:`N` is the activation vector
+      depth/dimensionality.
+
+    - A batch of weights, which matches or can be broadcast to match the shape
+      of the target ndarray. This arg can give uneven weighting to different
+      items in the batch (depending, for instance, on the item's target
+      category).
+
+  The layer returns the weighted average of these cross-entropy values over all
+  items in the batch.
+
+  Args:
+    label_smoothing: Creates soft targets if provided. Must be between 0 and 1.
+  """
+  def f(model_output, targets, weights):  # pylint: disable=invalid-name
+    cross_entropies = _category_cross_entropy(
+        model_output[-1:], targets['image'], label_smoothing)
+    gen_loss = jnp.sum(cross_entropies * weights) / _n_weights_per_core(weights)
+    cls_loss = L2Loss()([model_output[-1], targets['label'], weights])
+    return gen_loss+cls_loss
+
+  return base.Fn('WeightedCategoryCrossEntropyCls', f)
+
 def BinaryCrossEntropy():
   r"""Returns a layer that computes cross-entropy for binary classification.
 
