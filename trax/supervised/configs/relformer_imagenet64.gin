@@ -80,7 +80,7 @@ LSHSelfAttention.n_parallel_heads = 1
 LSHSelfAttention.predict_drop_len = 256
 LSHSelfAttention.predict_mem_len = 12288
 
-# Parameters for ReformerLM:
+# Parameters for RelformerLM:
 # ==============================================================================
 RelformerLM.d_model = 1024
 RelformerLM.d_ff = 4096
