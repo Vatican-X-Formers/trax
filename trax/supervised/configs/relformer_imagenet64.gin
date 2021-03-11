@@ -59,7 +59,7 @@ Adam.eps = 1e-9
 # Parameters for train:
 # ==============================================================================
 train.eval_frequency = 500
-train.eval_steps = 64
+train.eval_steps = 256
 # train.model: see top
 train.optimizer = @trax.optimizers.Adam
 train.steps = 500000
