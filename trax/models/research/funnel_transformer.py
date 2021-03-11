@@ -429,7 +429,7 @@ def _get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
 
 
 def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
-                          mode, ff_activation, context_bias_layer,
+                          mode, ff_activation, pos_type, context_bias_layer,
                           location_bias_layer, total_pooling):
   """Returns a list of layers that implements a Transformer encoder block.
 
@@ -461,7 +461,7 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
                                (activations, att_vecs, mask).
   """
   attention = RelativeAttentionLMLayer(
-      d_model, context_bias_layer, location_bias_layer,
+      d_model, pos_type, context_bias_layer, location_bias_layer,
       total_pooling,
       n_heads=n_heads, dropout=dropout, mode=mode)
 
@@ -579,6 +579,7 @@ def FunnelTransformerLM(vocab_size,
                         dropout=0.1,
                         dropout_shared_axes=None,
                         mode='train',
+                        pos_type=tl.PositionalEncoding,
                         ff_activation=tl.FastGelu):
   """Returns a Transformer language model.
 
@@ -641,7 +642,7 @@ def FunnelTransformerLM(vocab_size,
         # pylint: disable=g-complex-comprehension
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                               dropout_shared_axes, mode, ff_activation,
-                              context_bias_layer, location_bias_layer,
+                              pos_type, context_bias_layer, location_bias_layer,
                               total_pooling)
         for _ in range(n_layers)]
     return decoder_blocks + [tl.LayerNorm()]

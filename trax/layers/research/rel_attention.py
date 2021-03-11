@@ -53,6 +53,7 @@ from trax.layers.attention import SplitIntoHeads
 
 @assert_shape('bSq,blk,blv,b1xl->bSd,b1xl')
 def RelativeAttentionLayer(d_feature,
+                           pos_type,
                            context_bias_layer,
                            location_bias_layer,
                            total_kv_pooling,
@@ -92,12 +93,13 @@ def RelativeAttentionLayer(d_feature,
 
   return cb.Serial(
       cb.Branch(
-          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
-          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
+          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling, pos_type),
+          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling, pos_type),
           cb.Select([0]), cb.Select([1])),
+      core.PrintShape(6, "dbg"),
       cb.Parallel(
-          core.Dense(d_feature),
-          core.Dense(d_feature),
+          None,
+          None,
           core.Dense(d_feature),
           core.Dense(d_feature),
           core.Dense(d_feature),
@@ -113,6 +115,7 @@ def RelativeAttentionLayer(d_feature,
 
 @assert_shape('bSq,blk,blv->bSd')
 def RelativeAttentionLMLayer(d_feature,
+                             pos_type,
                              context_bias_layer,
                              location_bias_layer,
                              total_kv_pooling,
@@ -142,6 +145,7 @@ def RelativeAttentionLMLayer(d_feature,
 
   attention = RelativeAttentionLayer(
       d_feature,
+      pos_type,
       context_bias_layer,
       location_bias_layer,
       total_kv_pooling,
@@ -273,7 +277,7 @@ def DotProductAttention(queries, keys, values, l_emb, r_emb, mask, separate_cls,
   return out, dots
 
 
-def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
+def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling, pos_enc):
   """Positional embedding for relative attention.
 
   Returns a layer that based on queries, keys and accumulated pool size of
@@ -289,24 +293,13 @@ def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
     Positional embedding.
   """
 
-  def PositionsVectors(queries, keys):
-    keys_len, queries_len = keys.shape[1], queries.shape[1]
-
-    positions = jnp.arange(0, queries_len, 1.0)
-
-    return positions
-
-  def Sinusoidal_Embeddings(positions):
-    inv_freq = 1 / (10000**(jnp.arange(0.0, d_feature, 2.0) / d_feature))
-    sinusoid_freq = jnp.einsum('i,j->ij', positions, inv_freq)
-    pos_emb = jnp.concatenate(
-        [jnp.sin(sinusoid_freq), jnp.cos(sinusoid_freq)], axis=1)
-    return pos_emb
+  def ShapedZeros(queries, keys):
+    return jnp.zeros_like(queries[:1, ...])
 
   return cb.Serial(
-      cb.Fn('Generate positions vectors', PositionsVectors, n_out=1),
-      cb.Fn(
-          'Transform to sinusoidal encodings', Sinusoidal_Embeddings, n_out=1))
+      cb.Fn("Create dummy inputs for pos enc", ShapedZeros),
+      pos_enc()
+  )
 
 
 def calc_funnel_ratio(keys_len, queries_len):
