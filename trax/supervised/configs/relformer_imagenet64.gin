@@ -20,10 +20,11 @@ import trax.supervised.trainer_lib
 
 # Parameters that will vary between experiments:
 # ==============================================================================
-train.model = @trax.models.ReformerLM  # ShortenLM
+train.model = @trax.models.RelformerLM
 attn_type = @LSHSelfAttention  # @CausalFavor
 attn_kv = 64
 n_layers = 6
+pos_type = 'fixed_base'
 
 # Parameters for batcher:
 # ==============================================================================
@@ -31,12 +32,15 @@ batcher.data_streams = @tf_inputs.data_streams
 batcher.batch_size_per_device = 1
 batcher.eval_batch_size = 8
 batcher.max_eval_length = 12288  # 64 * 64 * 3
+batcher.variable_shapes = False
 
 # Parameters for data_streams:
 # ==============================================================================
 data_streams.data_dir = None
-data_streams.dataset_name = 't2t_image_imagenet64_gen_flat_rev'
-data_streams.input_name = 'targets'
+data_streams.dataset_name = 'downsampled_imagenet/64x64'
+data_streams.input_name = 'image'
+data_streams.target_name = 'image'
+data_streams.bare_preprocess_fn = @trax.data.tf_inputs.downsampled_imagenet_flatten_bare_preprocess
 
 # Parameters for multifactor:
 # ==============================================================================
@@ -78,36 +82,15 @@ LSHSelfAttention.predict_mem_len = 12288
 
 # Parameters for ReformerLM:
 # ==============================================================================
-ReformerLM.attention_type = %attn_type
-ReformerLM.d_attention_key = %attn_kv
-ReformerLM.d_attention_value = %attn_kv
-ReformerLM.d_model = 1024
-ReformerLM.d_ff = 4096
-ReformerLM.dropout = 0.0
-ReformerLM.ff_activation = @trax.layers.FastGelu
-ReformerLM.max_len = 12288  # 64 * 64 * 3
-ReformerLM.mode = 'train'
-ReformerLM.n_heads = 8
-ReformerLM.n_layers = %n_layers
-ReformerLM.vocab_size = 256
-ReformerLM.pos_axial_shape = (64, 64, 3)
-ReformerLM.pos_d_axial_embs= (384, 384, 256)
-
-# Parameters for ReformerShortenLM:
-# ==============================================================================
-ReformerShortenLM.attention_type = %attn_type
-ReformerShortenLM.d_attention_key = %attn_kv
-ReformerShortenLM.d_attention_value = %attn_kv
-ReformerShortenLM.shorten_factor = 3
-ReformerShortenLM.d_embedding = 256
-ReformerShortenLM.d_model = 1024
-ReformerShortenLM.d_ff = 4096
-ReformerShortenLM.dropout = 0.0
-ReformerShortenLM.ff_activation = @trax.layers.FastGelu
-ReformerShortenLM.max_len = 12288  # 64 * 64 * 3
-ReformerShortenLM.mode = 'train'
-ReformerShortenLM.n_heads = 8
-ReformerShortenLM.n_layers = %n_layers
-ReformerShortenLM.vocab_size = 256
-ReformerShortenLM.pos_axial_shape = (64, 64, 3)
-ReformerShortenLM.pos_d_axial_embs= (96, 96, 64)
+RelformerLM.d_model = 1024
+RelformerLM.d_ff = 4096
+RelformerLM.dropout = 0.0
+RelformerLM.ff_activation = @trax.layers.FastGelu
+RelformerLM.max_len = 12288  # 64 * 64 * 3
+RelformerLM.mode = 'train'
+RelformerLM.n_heads = 8
+RelformerLM.n_rel_layers = %n_layers
+RelformerLM.vanilla_layers = (3, 3)
+RelformerLM.vocab_size = 256
+RelformerLM.vanilla_attn_type = %attn_type
+RelformerLM.pos_type = %pos_type
