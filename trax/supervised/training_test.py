@@ -31,6 +31,7 @@ from trax import optimizers
 from trax import shapes
 from trax import test_utils
 from trax.models import transformer
+from trax.models import FunnelTransformerLM
 from trax.supervised import callbacks
 from trax.supervised import training
 
@@ -154,6 +155,35 @@ class TrainingTest(absltest.TestCase):
       ts = training.Loop(m, [task], eval_tasks=[eval_task],
                          eval_at=lambda step_n: step_n % 2 == 0,
                          output_dir=tmp_dir)
+      return m, ts
+
+    model, training_session = _make_model_and_session()
+    self.assertEqual(0, training_session.step)
+    training_session.run(n_steps=1)
+    training_session.save_checkpoint()
+    model2, training_session2 = _make_model_and_session()
+
+    x = np.ones((2, 2)).astype(np.int32)
+    y1 = model(x, rng=fastmath.random.get_prng(0))
+    y2 = model2(x, rng=fastmath.random.get_prng(0))
+    self.assertEqual(str(y1), str(y2))
+
+    training_session2.run(n_steps=1)
+    y1 = model(x, rng=fastmath.random.get_prng(0))
+    y2 = model2(x, rng=fastmath.random.get_prng(0))
+    self.assertNotEqual(str(y1), str(y2))
+
+  def test_train_save_restore_funnel_transformer_lm_cls(self):
+    """Saves and restores a checkpoint to check for equivalence."""
+    vocab_size = 8
+    task = training.TrainTask(
+        _very_simple_transformer_data(), tl.WeightedCategoryCrossEntropy(), optimizers.Adam())
+    tmp_dir = self.create_tempdir().full_path
+
+    def _make_model_and_session():
+      m = FunnelTransformerLM(
+          vocab_size, d_model=4, d_ff=4, n_heads=2)
+      ts = training.Loop(m, [task])
       return m, ts
 
     model, training_session = _make_model_and_session()
