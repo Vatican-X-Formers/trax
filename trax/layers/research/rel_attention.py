@@ -92,8 +92,8 @@ def RelativeAttentionLayer(d_feature,
 
   return cb.Serial(
       cb.Branch(
-          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
-          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
+          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling, subtract=False),
+          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling, subtract=True),
           cb.Select([0]), cb.Select([1])),
       cb.Parallel(
           core.Dense(d_feature),
@@ -273,7 +273,8 @@ def DotProductAttention(queries, keys, values, l_emb, r_emb, mask, separate_cls,
   return out, dots
 
 
-def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
+def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling,
+                         subtract=False):
   """Positional embedding for relative attention.
 
   Returns a layer that based on queries, keys and accumulated pool size of
@@ -292,7 +293,10 @@ def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
   def PositionsVectors(queries, keys):
     keys_len, queries_len = keys.shape[1], queries.shape[1]
 
-    positions = jnp.arange(0, queries_len, 1.0)
+    if not subtract:
+      positions = jnp.arange(0, queries_len, 1.0)
+    else:
+      positions = jnp.arange(0, -queries_len, -1.0)
 
     return positions
 
