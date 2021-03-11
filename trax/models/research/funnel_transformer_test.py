@@ -120,7 +120,7 @@ class FunnelTransformerTest(parameterized.TestCase):
   def test_funnel_transformer_lm_forward_shape(self):
     d_model = 8
     vocab_size = 7
-    x = np.ones((3, 384)).astype(np.int32)
+    x = np.ones((3, 6)).astype(np.int32)
 
     simple_funnel = ft.RelformerLM(
         vocab_size,
@@ -132,7 +132,18 @@ class FunnelTransformerTest(parameterized.TestCase):
     )
     _, _ = simple_funnel.init(shapes.signature(x))
     y = simple_funnel(x)
-    self.assertEqual(y.shape, (3, 384, vocab_size))
+    self.assertEqual(y.shape, (3, 6, vocab_size))
+
+    multi_stage_funnel = ft.FunnelTransformerLM(
+        vocab_size,
+        shorten_factors=(3, 2),
+        n_funnel_blocks=(0, 0),
+        vanilla_layers=(0, 0),
+        d_model=d_model, d_ff=d_model, n_heads=2)
+
+    _, _ = multi_stage_funnel.init(shapes.signature(x))
+    y = multi_stage_funnel(x)
+    self.assertEqual(y.shape, (3, 6, vocab_size))
 
   def test_funnel_transformer_lm_autoregressive_property(self):
     input_shape = (1, 12)
