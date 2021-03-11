@@ -24,7 +24,7 @@ train.model = @trax.models.RelformerLM
 attn_type = @LSHSelfAttention  # @CausalFavor
 attn_kv = 64
 n_layers = 6
-pos_type = 'fixed_base'
+pos_type = 'fixed-base'
 
 # Parameters for batcher:
 # ==============================================================================
@@ -91,6 +91,7 @@ RelformerLM.mode = 'train'
 RelformerLM.n_heads = 8
 RelformerLM.n_rel_layers = %n_layers
 RelformerLM.vanilla_layers = (3, 3)
+RelformerLM.shorten_factor = 3
 RelformerLM.vocab_size = 256
 RelformerLM.vanilla_attn_type = %attn_type
 RelformerLM.pos_type = %pos_type
