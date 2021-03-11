@@ -570,20 +570,20 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   ]
 
 
-def FunnelTransformerLM(vocab_size,
-                        d_model=512,
-                        d_ff=2048,
-                        vanilla_layers=(1, 1),
-                        shorten_factor=3,
-                        n_rel_layers=6,
-                        n_heads=8,
-                        dropout=0.1,
-                        dropout_shared_axes=None,
-                        vanilla_attn_type=tl.LSHSelfAttention,
-                        pos_type='fixed-base',
-                        max_len=3072,
-                        mode='train',
-                        ff_activation=tl.FastGelu):
+def RelformerLM(vocab_size,
+                d_model=512,
+                d_ff=2048,
+                vanilla_layers=(1, 1),
+                shorten_factor=3,
+                n_rel_layers=6,
+                n_heads=8,
+                dropout=0.1,
+                dropout_shared_axes=None,
+                vanilla_attn_type=tl.LSHSelfAttention,
+                pos_type='fixed-base',
+                max_len=3072,
+                mode='train',
+                ff_activation=tl.FastGelu):
   """Returns a Transformer language model.
 
   This model performs autoregressive language modeling:
