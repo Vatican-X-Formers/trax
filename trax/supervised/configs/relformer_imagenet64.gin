@@ -20,11 +20,9 @@ import trax.supervised.trainer_lib
 
 # Parameters that will vary between experiments:
 # ==============================================================================
-train.model = @trax.models.RelformerLM
-attn_type = @LSHSelfAttention  # @CausalFavor
-attn_kv = 64
 n_layers = 6
 pos_type = 'fixed-base'
+attn_type = @LSHSelfAttention  # @CausalFavor
 
 # Parameters for batcher:
 # ==============================================================================
@@ -60,7 +58,7 @@ Adam.eps = 1e-9
 # ==============================================================================
 train.eval_frequency = 500
 train.eval_steps = 256
-# train.model: see top
+train.model = @trax.models.RelformerLM
 train.optimizer = @trax.optimizers.Adam
 train.steps = 500000
 train.save_graphs = False
