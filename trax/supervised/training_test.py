@@ -177,12 +177,12 @@ class TrainingTest(absltest.TestCase):
     """Saves and restores a checkpoint to check for equivalence."""
     vocab_size = 8
     task = training.TrainTask(
-        _very_simple_transformer_data(), tl.WeightedCategoryCrossEntropy(), optimizers.Adam())
-    tmp_dir = self.create_tempdir().full_path
+        _very_simple_transformer_data_gen(), tl.WeightedCategoryCrossEntropy(), optimizers.Adam())
 
     def _make_model_and_session():
-      m = FunnelTransformerLM(
-          vocab_size, d_model=4, d_ff=4, n_heads=2)
+      #m = FunnelTransformerLM(
+      #    vocab_size, d_model=4, d_ff=4, n_heads=2, vanilla_layers=(2,2))
+      m = transformer.TransformerLM(vocab_size, d_model=4, d_ff=4, n_heads=2)
       ts = training.Loop(m, [task])
       return m, ts
 
@@ -580,6 +580,13 @@ def _very_simple_transformer_data():
   while True:
     yield labeled_batch
 
+def _very_simple_transformer_data_gen():
+  """"Returns stream of labeled data that maps small integers to constant pi."""
+  inputs_batch = np.ones((2, 2)).astype(np.int32)
+  targets_batch = np.ones((2, 2, 8)).astype(np.int32)
+  labeled_batch = (inputs_batch, targets_batch, np.ones_like(targets_batch))
+  while True:
+    yield labeled_batch
 
 def _count_files(path):
   """Returns number of files in a given directory."""

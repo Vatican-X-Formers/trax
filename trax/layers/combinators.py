@@ -100,6 +100,7 @@ class Serial(base.Layer):
     # dtypes), but weights and states are non-abstract actual values.
     stack = input_signature
     for sublayer in self.sublayers:
+      #print('debug sublayer', sublayer)
       inputs = inputs_from_stack(stack, sublayer.n_in)
       weights_or_cache_marker, state_or_cache_marker = (
           sublayer.init(inputs, use_cache=True))
