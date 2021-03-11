@@ -124,8 +124,8 @@ class FunnelTransformerTest(parameterized.TestCase):
 
     simple_funnel = ft.FunnelTransformerLM(
         vocab_size,
-        shorten_factors=(3,),
-        n_funnel_blocks=(1,),
+        shorten_factor=3,
+        n_rel_layers=1,
         vanilla_layers=(1, 1),
         d_model=d_model, d_ff=d_model, n_heads=2
     )
@@ -150,8 +150,8 @@ class FunnelTransformerTest(parameterized.TestCase):
     with fastmath.use_backend(fastmath.Backend.JAX):
       model = ft.FunnelTransformerLM(
           vocab_size,
-          shorten_factors=(3,),
-          n_funnel_blocks=(1,),
+          shorten_factor=3,
+          n_rel_layers=1,
           vanilla_layers=(1, 1),
           d_model=d_model, d_ff=4*d_model, n_heads=2
       )

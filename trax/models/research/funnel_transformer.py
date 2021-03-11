@@ -573,9 +573,9 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
 def FunnelTransformerLM(vocab_size,
                         d_model=512,
                         d_ff=2048,
-                        vanilla_layers=(0, 1),
-                        shorten_factors=(3,),
-                        n_funnel_blocks=(6,),
+                        vanilla_layers=(1, 1),
+                        shorten_factor=3,
+                        n_rel_layers=6,
                         n_heads=8,
                         dropout=0.1,
                         dropout_shared_axes=None,
@@ -609,10 +609,9 @@ def FunnelTransformerLM(vocab_size,
         block.
     vanilla_layers: (pre_layers, post_layers) tuple - number of full token-level
         Transformer decoder layers before and after shortening.
-    shorten_factors: by how much to shorten at each step - tuple of arbitrary
-        length denoting by how much shorten at each pooling stage.
-    n_funnel_blocks: number of Transformer decoder blocks after each stage of
-        pooling - tuple of the same length as `shorten_factors`.
+    shorten_factor: by how much to shorten
+    n_rel_layers: number of Transformer blocks after the pooling. These blocks
+        use relative attention.
     n_heads: Number of attention heads.
     dropout: Stochastic rate (probability) for dropping an activation value
         when applying dropout within an encoder block.
@@ -633,7 +632,6 @@ def FunnelTransformerLM(vocab_size,
     to activations over a vocab set.
   """
   assert mode != 'predict'  # For now, 'predict' mode is unsupported.
-  assert len(n_funnel_blocks) == len(shorten_factors)
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
@@ -646,7 +644,7 @@ def FunnelTransformerLM(vocab_size,
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
-  def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
+  def create_decoder_blocks(n_layers, total_pooling):
     decoder_blocks = [
         # pylint: disable=g-complex-comprehension
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
@@ -679,20 +677,12 @@ def FunnelTransformerLM(vocab_size,
         tl.Dense(d_model) if dense else [],
     ]
 
-  total_pooling_acc = 1
   pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks, dense=True)
 
-  funnel_blocks = []
-
-  for shorten_factor, block_len in zip(shorten_factors, n_funnel_blocks):
-    total_pooling_acc *= shorten_factor
-    funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
-                                                          total_pooling_acc)
-
-  upsampling_layer = _UpsamplerLM(total_pooling_acc, d_model)
+  relative_decoder_blocks = create_decoder_blocks(n_rel_layers, shorten_factor)
 
   conv_layer = tl.Serial(
-      tl.CausalConv(d_model, total_pooling_acc),
+      tl.CausalConv(d_model, shorten_factor),
       ff_activation()
   )
 
@@ -706,11 +696,11 @@ def FunnelTransformerLM(vocab_size,
       positional_encoder,
       pre_decoder_blocks,        # vecs
       tl.Dup(),
-      tl.ShiftRight(n_positions=total_pooling_acc - 1),
-      _DownsamplerLM(total_pooling_acc, d_model),
-      funnel_blocks,
+      tl.ShiftRight(n_positions=shorten_factor - 1),
+      _DownsamplerLM(shorten_factor, d_model),
+      relative_decoder_blocks,
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
-      upsampling_layer,
+      _UpsamplerLM(shorten_factor, d_model),
       tl.LayerNorm(),
       tl.Concatenate(),
       conv_layer,
