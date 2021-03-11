@@ -97,6 +97,9 @@ PureLSHSelfAttentionWrapper = layer_configure(
     PureLSHSelfAttentionWrapper, denylist=['mode'])
 EncDecAttention = layer_configure(EncDecAttention, denylist=['mode'])
 
+PositionalEncoding = layer_configure(PositionalEncoding, denylist=['mode'])
+FixedBasePositionalEncoding = layer_configure(FixedBasePositionalEncoding,
+                                              denylist=['mode'])
 InfinitePositionalEncoding = layer_configure(
     InfinitePositionalEncoding, denylist=['mode'])
 TimeBinPositionalEncoding = layer_configure(

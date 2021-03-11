@@ -96,7 +96,6 @@ def RelativeAttentionLayer(d_feature,
           PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling, pos_type),
           PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling, pos_type),
           cb.Select([0]), cb.Select([1])),
-      core.PrintShape(6, "dbg"),
       cb.Parallel(
           None,
           None,
