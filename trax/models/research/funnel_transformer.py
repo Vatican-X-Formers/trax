@@ -579,7 +579,7 @@ def FunnelTransformerLM(vocab_size,
                         n_heads=8,
                         dropout=0.1,
                         dropout_shared_axes=None,
-                        attn_type=tl.LSHSelfAttention,
+                        vanilla_attn_type=tl.LSHSelfAttention,
                         pos_type='fixed-base',
                         max_len=3072,
                         mode='train',
@@ -620,6 +620,10 @@ def FunnelTransformerLM(vocab_size,
         Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
         a useful way to save memory and apply consistent masks to activation
         vectors at different sequence positions.
+    vanilla_attn_type: class: attention class such as SelfAttention to use in
+        the layers before and after shortening (vanilla layers).
+    pos_type: string, the type of positional embeddings to use.
+    max_len: int: maximum symbol length for positional encoding
     mode: str: 'train' or 'eval'.
     ff_activation: Type of activation function at the end of each encoder
         block; must be an activation-type subclass of `Layer`.
@@ -635,8 +639,7 @@ def FunnelTransformerLM(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
-  positional_encoder = PositionalEncoder(
-      mode, dropout, max_len, pos_type) if pos_type is not None else []
+  positional_encoder = PositionalEncoder(mode, dropout, max_len, pos_type)
 
   context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
                                                                 n_heads)
@@ -659,7 +662,7 @@ def FunnelTransformerLM(vocab_size,
     d_per_head = d_model // n_heads
     decoder_blocks = [
         DecoderBlock(d_model, d_ff, d_per_head, d_per_head, n_heads,
-                     attn_type,
+                     vanilla_attn_type,
                      dropout, ff_activation, dropout,
                      ff_use_sru=0,
                      ff_chunk_size=0,
