@@ -580,7 +580,8 @@ def FunnelTransformerLM(vocab_size,
                         dropout=0.1,
                         dropout_shared_axes=None,
                         mode='train',
-                        ff_activation=tl.FastGelu):
+                        ff_activation=tl.FastGelu,
+                        n_classes=None):
   """Returns a Transformer language model.
 
   This model performs autoregressive language modeling:
@@ -685,6 +686,15 @@ def FunnelTransformerLM(vocab_size,
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
                                               total_pooling=1)
 
+  head = tl.Dense(vocab_size) if not n_classes else tl.Branch(
+      tl.Dense(vocab_size),  # vecs
+      tl.Serial(
+          tl.Mean(axis=1),
+          tl.Dense(n_classes)
+      ),
+      tl.PrintShape(2, 'Funnel out')
+  )
+
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
@@ -699,7 +709,7 @@ def FunnelTransformerLM(vocab_size,
       tl.Concatenate(),
       conv_layer,
       post_decoder_blocks,
-      tl.Dense(vocab_size),      # vecs
+      head
   )
 
 
