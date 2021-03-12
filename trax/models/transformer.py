@@ -200,7 +200,8 @@ def TransformerLM(vocab_size,
                   dropout=DROPOUT_RATE,
                   dropout_shared_axes=DROPOUT_SHARED_AXES,
                   mode=MODE,
-                  ff_activation=FF_ACTIVATION_TYPE):
+                  ff_activation=FF_ACTIVATION_TYPE,
+                  n_classes=None):
   """Returns a Transformer language model.
 
   This model performs autoregressive language modeling:
@@ -254,6 +255,14 @@ def TransformerLM(vocab_size,
     return _DecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
                          mode, ff_activation)
 
+  head = tl.Dense(vocab_size) if not n_classes else tl.Branch(
+      tl.Dense(vocab_size),  # vecs
+      tl.Serial(
+          tl.Mean(axis=1),
+          tl.Dense(n_classes)
+      )
+  )
+
   return tl.Serial(
       tl.ShiftRight(mode=mode),
       tl.Embedding(vocab_size, d_model),
@@ -261,7 +270,7 @@ def TransformerLM(vocab_size,
       tl.PositionalEncoding(max_len=max_len, mode=mode),
       [_DecBlock() for _ in range(n_layers)],
       tl.LayerNorm(),
-      tl.Dense(vocab_size),
+      head
   )
 
 
