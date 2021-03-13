@@ -554,6 +554,8 @@ def cifar10_no_augmentation_preprocess(dataset, training):
     features['image'] = tf.cast(features['image'], tf.float32) / 255.0
     return features, targets
 
+  # dataset = {'features': ..., 'targets': ...}
+  print(type(dataset))
   dataset = dataset.map(cast_image)
   return dataset
 
