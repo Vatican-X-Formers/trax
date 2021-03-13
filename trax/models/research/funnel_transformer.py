@@ -569,6 +569,11 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       ),
   ]
 
+# @gin.configurable()
+# def FunnelGenClsLoss():
+#   gen_loss = [tl.Select([0, 2, 3], n_in=6), tl.WeightedCategoryCrossEntropy()]
+#   cls_loss = [tl.Select([1, 4, 5], n_in=6), tl.WeightedCategoryCrossEntropy()]
+#   return tl.Serial(tl.Branch(nsp_loss, mlm_loss), tl.Add())
 
 def FunnelTransformerLM(vocab_size,
                         d_model=512,
@@ -686,13 +691,13 @@ def FunnelTransformerLM(vocab_size,
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
                                               total_pooling=1)
 
-  head = tl.Serial(tl.Dense(vocab_size), tl.PrintShape(2, 'Funnel out non-cls')) if not n_classes else tl.Branch(
+  head = tl.Serial(tl.Dense(vocab_size), tl.PrintShape(3, 'Funnel out non-cls')) if not n_classes else tl.Branch(
       tl.Dense(vocab_size),  # vecs
       tl.Serial(
           tl.Mean(axis=1),
           tl.Dense(n_classes)
       ),
-      tl.PrintShape(2, 'Funnel out cls')
+      tl.PrintShape(7, 'Funnel out cls')
   )
 
   # Assemble and return the model.
