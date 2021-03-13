@@ -691,8 +691,7 @@ def FunnelTransformerLM(vocab_size,
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
                                               total_pooling=1)
 
-  head = tl.Serial(tl.Dense(vocab_size), tl.PrintShape(3, 'Funnel out non-cls')) if not n_classes 
-  else tl.Serial(tl.Branch(
+  head = tl.Serial(tl.Dense(vocab_size), tl.PrintShape(3, 'Funnel out non-cls')) if not n_classes else tl.Serial(tl.Branch(
       tl.Dense(vocab_size),  # vecs
       tl.Serial(
           tl.Mean(axis=1),
