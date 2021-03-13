@@ -26,7 +26,8 @@ from trax.layers import core
 from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer
-from trax.models.research.configurable_transformer import PositionalEncoder
+from trax.models.research.configurable_transformer import PositionalEncoder, \
+  FeedForwardWithOptions
 from trax.models.transformer import _EncoderBlock
 from trax.models.transformer import _FeedForwardBlock
 from trax.models.reformer.reformer import DecoderBlock
@@ -703,6 +704,68 @@ def FunnelTransformerLM(vocab_size,
   )
 
 
+def _ReversibleRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
+                                    dropout_shared_axes,
+                                    mode, ff_activation, context_bias_layer,
+                                    location_bias_layer, total_pooling):
+  """Returns a list of layers that implements a Transformer encoder block.
+
+  The input to the block is a pair, (activations, mask), where the mask was
+  created from the original source tokens to prevent attending to the padding
+  part of the input.
+
+  Args:
+    d_model: Final dimension of tensors at most points in the model, including
+        the initial embedding output.
+    d_ff: Size of special dense layer in the feed-forward part of each block.
+    n_heads: Number of attention heads.
+    dropout: Stochastic rate (probability) for dropping an activation value
+        when applying dropout within a block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
+    mode: If `'train'`, each block will include dropout; else, it will
+        pass all values through unaltered.
+    ff_activation: Type of activation function at the end of each block; must
+        be an activation-type subclass of `Layer`.
+    context_bias_layer: Global context bias from Transformer XL's attention.
+    location_bias_layer: Global location bias from Transformer XL's attention.
+    total_pooling: The combined pool size of previously used funnel blocks.
+
+  Returns:
+    A list of layers that maps (activations, att_vecs, mask) to
+                               (activations, att_vecs, mask).
+  """
+  rel_attention = RelativeAttentionLMLayer(
+      d_model, context_bias_layer, location_bias_layer,
+      total_pooling,
+      n_heads=n_heads, dropout=dropout, mode=mode)
+
+  attention_wrapper = tl.ReversibleSerial(
+      tl.ReversibleSelect([0, 0, 0]),
+      rel_attention
+  )
+
+  attention_layer = [
+      tl.ReversibleHalfResidual(
+          tl.LayerNorm(),
+          attention_layer=attention_wrapper,
+          name='ReversibleHalfResidualRelativeAttn'),
+          tl.ReversibleSwap()
+      ]
+
+  feed_forward = [tl.ReversibleHalfResidual(
+          FeedForwardWithOptions(
+              d_model, d_ff, dropout, [-2], ff_activation, dropout,
+              ff_chunk_size=0, ff_use_sru=0, ff_sparsity=0, mode=mode,
+              use_bfloat16=False),
+          name='ReversibleHalfResidualDecoderFF'),
+          tl.ReversibleSwap()
+      ]
+  return attention_layer + feed_forward
+
+
 def RelformerLM(vocab_size,
                 d_model=512,
                 d_ff=2048,
@@ -779,18 +842,19 @@ def RelformerLM(vocab_size,
                                                                   n_heads)
     decoder_blocks = [
         # pylint: disable=g-complex-comprehension
-        _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
-                              dropout_shared_axes, mode, ff_activation,
-                              context_bias_layer, location_bias_layer,
-                              total_pooling)
+        _ReversibleRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
+                                        dropout_shared_axes, mode,
+                                        ff_activation,
+                                        context_bias_layer, location_bias_layer,
+                                        total_pooling)
         for _ in range(n_layers)]
-    return decoder_blocks + [tl.LayerNorm()]
+    return decoder_blocks
 
-  def create_reformer_blocks(n_layers, dense=True):
+  def create_reformer_blocks(n_layers):
     if n_layers == 0:
       return [tl.LayerNorm()]
     d_per_head = d_model // n_heads
-    decoder_blocks = [
+    reformer_blocks = [
         DecoderBlock(d_model, d_ff, d_per_head, d_per_head, n_heads,
                      vanilla_attn_type,
                      dropout, ff_activation, dropout,
@@ -801,15 +865,9 @@ def RelformerLM(vocab_size,
                      mode=mode)
         for _ in range(n_layers)]
 
-    return [
-        tl.Dup(),
-        tl.ReversibleSerial(decoder_blocks),
-        tl.Concatenate(),
-        tl.LayerNorm(),
-        tl.Dense(d_model) if dense else [],
-    ]
+    return reformer_blocks
 
-  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks, dense=True)
+  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks)
 
   relative_decoder_blocks = create_decoder_blocks(n_rel_layers, shorten_factor)
 
@@ -818,19 +876,20 @@ def RelformerLM(vocab_size,
       ff_activation()
   )
 
-  post_decoder_blocks = create_reformer_blocks(n_post_decoder_blocks,
-                                               dense=False)
+  post_decoder_blocks = create_reformer_blocks(n_post_decoder_blocks)
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,             # vecs
       positional_encoder,
-      pre_decoder_blocks,        # vecs
       tl.Dup(),
+      tl.ReversibleSerial(pre_decoder_blocks),        # vecs
       tl.ShiftRight(n_positions=shorten_factor - 1),
       _DownsamplerLM(shorten_factor, d_model),
-      relative_decoder_blocks,
+      tl.Dup(),
+      tl.ReversibleSerial(relative_decoder_blocks),
+      tl.Add(),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       _UpsamplerLM(shorten_factor, d_model),
       tl.LayerNorm(),

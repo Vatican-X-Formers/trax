@@ -43,6 +43,7 @@ from trax.fastmath import numpy as jnp
 from trax.layers import base
 from trax.layers import combinators as cb
 from trax.layers import core
+from trax.layers.reversible import ReversibleSerial, ReversibleSelect
 from trax.layers.assert_shape import assert_shape
 from trax.layers.attention import MergeHeads
 from trax.layers.attention import SplitIntoHeads
@@ -90,7 +91,7 @@ def RelativeAttentionLayer(d_feature,
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
 
-  return cb.Serial(
+  return ReversibleSerial(
       cb.Branch(
           PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling),
           cb.Select([0]), cb.Select([1])),
@@ -150,8 +151,7 @@ def RelativeAttentionLMLayer(d_feature,
       dropout=dropout,
       mode=mode)
 
-  return cb.Serial(
-      CreateAttentionMaskLayer(),  # q, k, v, mask
+  return ReversibleSerial(
       attention,  # vecs, mask
       cb.Select([0], n_in=2),  # vecs
   )
@@ -196,7 +196,8 @@ class RelativeAttention(base.Layer):
     Args:
       inputs: A (location_bias, context_bias, pos_emb, q, k, v, mask) tuple.
     """
-    location_bias, context_bias, pos_emb, q, k, v, mask = inputs
+    location_bias, context_bias, pos_emb, q, k, v = inputs
+    mask = calculate_mask(q, k)
 
     d_feature = q.shape[-1]
     n_heads = self._n_heads
@@ -392,72 +393,52 @@ def _fast_matrix_shift(x, funnel_factor, is_upsampling=False):
   return x
 
 
-@assert_shape('bqd,bkd,bvd->bqd,bkd,bvd,b1qk')
-def CreateAttentionMaskLayer():
-  """Creates attention mask layer.
+def calculate_mask(queries, keys):
+  batch_size = queries.shape[0]
+  keys_len, queries_len = keys.shape[-2], queries.shape[-2]
+  funnel_factor, is_upsampling = calc_funnel_ratio(keys_len, queries_len)
+
+  return _funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
+                      is_upsampling)
+
+
+def _funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
+                 is_upsampling):
+  """Creates a funnel mask.
+
+  This function based on keys/queries lengths creates a triangle mask
+  that prevents tokens from attending to positions following it.
+
+  If funnel_factor is not equal to 1 due to funnel upsampling or
+  downsampling it adjusts created mask for funnel attention
+  by repeating each element funnel_factor times.
+
+  This is because after funnel layer one token attends to funnel_factor
+  different tokens in downsampling. During upsampling on the other hand
+  funnel_factor tokens are attending to single token before upsampling.
+
+  Args:
+    batch_size: batch size.
+    keys_len: keys length.
+    queries_len: queries length.
+    funnel_factor: funnel factor.
+    is_upsampling: upsampling if set to True.
 
   Returns:
-    Returns a layer that based on queries, keys and accumulated pool size of
-    keys/values until this layer calculates positional embeddings for
-    causal relative attention calculations.
-
-    Takes as input q, k, v and appends proper mask in the end.
-
-    Causal attention uses masking to prevent a given sequence position from
-    attending to positions greater than / following it. This is used, for
-    example, when training autoregressive sequence models, or when decoding a
-    sequence symbol by symbol.
+    Funnel mask.
   """
 
-  def calculate_mask(queries, keys):
-    batch_size = queries.shape[0]
-    keys_len, queries_len = keys.shape[-2], queries.shape[-2]
-    funnel_factor, is_upsampling = calc_funnel_ratio(keys_len, queries_len)
-
-    return _funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
-                        is_upsampling)
-
-  def _funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
-                   is_upsampling):
-    """Creates a funnel mask.
-
-    This function based on keys/queries lengths creates a triangle mask
-    that prevents tokens from attending to positions following it.
-
-    If funnel_factor is not equal to 1 due to funnel upsampling or
-    downsampling it adjusts created mask for funnel attention
-    by repeating each element funnel_factor times.
-
-    This is because after funnel layer one token attends to funnel_factor
-    different tokens in downsampling. During upsampling on the other hand
-    funnel_factor tokens are attending to single token before upsampling.
-
-    Args:
-      batch_size: batch size.
-      keys_len: keys length.
-      queries_len: queries length.
-      funnel_factor: funnel factor.
-      is_upsampling: upsampling if set to True.
-
-    Returns:
-      Funnel mask.
-    """
-
-    if funnel_factor != 1:
-      if not is_upsampling:
-        mask = jnp.tril(jnp.ones((queries_len, queries_len), dtype=jnp.bool_))
-        mask = jnp.repeat(mask, funnel_factor, axis=-1)
-      else:
-        mask = jnp.tril(jnp.ones((keys_len, keys_len), dtype=jnp.bool_))
-        mask = jnp.repeat(mask, funnel_factor, axis=-2)
-    else:
+  if funnel_factor != 1:
+    if not is_upsampling:
       mask = jnp.tril(jnp.ones((queries_len, queries_len), dtype=jnp.bool_))
+      mask = jnp.repeat(mask, funnel_factor, axis=-1)
+    else:
+      mask = jnp.tril(jnp.ones((keys_len, keys_len), dtype=jnp.bool_))
+      mask = jnp.repeat(mask, funnel_factor, axis=-2)
+  else:
+    mask = jnp.tril(jnp.ones((queries_len, queries_len), dtype=jnp.bool_))
 
-    return jnp.repeat(mask[None, None, :, :], batch_size, axis=0)
-
-  return cb.Branch(
-      cb.Select([0]), cb.Select([1]), cb.Select([2]),
-      cb.Fn('create attention mask layer', calculate_mask, n_out=1))
+  return jnp.repeat(mask[None, None, :, :], batch_size, axis=0)
 
 
 @assert_shape('...d->...d')
