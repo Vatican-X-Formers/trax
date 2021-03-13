@@ -561,13 +561,19 @@ def cifar10_no_augmentation_preprocess(dataset, training):
 def cifar10_gen_cls(dataset, training):
   del training
 
-  def cast_flat_image(features, targets):
-    img = tf.cast(features['image'], tf.float32) / 255.0
+  def cast_image(features, targets):
+    features['image'] = tf.cast(features['image'], tf.float32) / 255.0
+    return features, targets
+
+  def flat_image(features, targets):
+    img = features['image']
     flat = tf.cast(tf.reshape(img, [-1]), tf.int64)
     new_features = {'image': flat}
     return new_features, targets
 
-  dataset = dataset.map(cast_flat_image)
+  dataset = dataset.map(cast_image)
+  dataset = dataset.map(flat_image)
+
   return dataset
 
 
