@@ -842,6 +842,9 @@ def Add():
   """Adds two tensors."""
   return Fn('Add', lambda x0, x1: x0 + x1)
 
+def WeightedAdd(alpha):
+  """Adds two tensors."""
+  return Fn('Add', lambda x0, x1: x0 + alpha*x1)
 
 def SubtractTop():
   """Subtracts the first tensor from the second."""

@@ -20,7 +20,7 @@ Funnel-Transformer: Filtering out Sequential Redundancy for Efficient
 Language Processing https://arxiv.org/abs/2006.03236
 """
 from trax import layers as tl
-from trax.fastmath import numpy as jnp
+from trax.fastmath import numpy as jnp, gin
 from trax.fastmath.ops import index_add
 from trax.layers import core
 from trax.layers import initializers as init
@@ -569,11 +569,11 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       ),
   ]
 
-# @gin.configurable()
-# def FunnelGenClsLoss():
-#   gen_loss = [tl.Select([0, 2, 3], n_in=6), tl.WeightedCategoryCrossEntropy()]
-#   cls_loss = [tl.Select([1, 4, 5], n_in=6), tl.WeightedCategoryCrossEntropy()]
-#   return tl.Serial(tl.Branch(nsp_loss, mlm_loss), tl.Add())
+@gin.configurable()
+def FunnelGenClsLoss():
+  gen_loss = [tl.Select([0], n_in=2), tl.WeightedCategoryCrossEntropy()]
+  cls_loss = [tl.Select([1], n_in=2), tl.WeightedCategoryCrossEntropy()]
+  return tl.Serial(tl.Branch(gen_loss, cls_loss), tl.WeightedAdd(1.0))
 
 def FunnelTransformerLM(vocab_size,
                         d_model=512,
@@ -691,13 +691,21 @@ def FunnelTransformerLM(vocab_size,
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
                                               total_pooling=1)
 
-  head = tl.Serial(tl.Dense(vocab_size), tl.PrintShape(3, 'Funnel out non-cls')) if not n_classes else tl.Serial(tl.Branch(
+  head_unused = tl.Serial(tl.Dense(vocab_size), tl.PrintShape(3, 'Funnel out non-cls')) if not n_classes else tl.Serial(tl.Branch(
       tl.Dense(vocab_size),  # vecs
       tl.Serial(
           tl.Mean(axis=1),
           tl.Dense(n_classes)
       )),
       tl.PrintShape(4, 'Funnel out cls')
+  )
+
+  head = tl.Dense(vocab_size) if not n_classes else tl.Branch(
+      tl.Dense(vocab_size),  # vecs
+      tl.Serial(
+          tl.Mean(axis=1),
+          tl.Dense(n_classes)
+      )
   )
 
   # Assemble and return the model.
