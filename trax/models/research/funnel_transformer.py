@@ -697,7 +697,7 @@ def FunnelTransformerLM(vocab_size,
           tl.Mean(axis=1),
           tl.Dense(n_classes)
       )),
-      tl.PrintShape(3, 'Funnel out cls')
+      tl.PrintShape(7, 'Funnel out cls')
   )
 
   # Assemble and return the model.
