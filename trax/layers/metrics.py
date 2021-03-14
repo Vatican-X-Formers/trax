@@ -213,6 +213,7 @@ def WeightedCategoryCrossEntropy(label_smoothing=None):
     label_smoothing: Creates soft targets if provided. Must be between 0 and 1.
   """
   def f(model_output, targets, weights):  # pylint: disable=invalid-name
+    print('model_output.shape', model_output.shape, 'targets.shape', targets.shape, 'weights.shape', weights.shape)
     cross_entropies = _category_cross_entropy(
         model_output, targets, label_smoothing)
     return jnp.sum(cross_entropies * weights) / _n_weights_per_core(weights)

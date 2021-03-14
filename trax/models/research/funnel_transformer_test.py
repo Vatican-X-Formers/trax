@@ -197,6 +197,17 @@ class FunnelTransformerTest(parameterized.TestCase):
     y = loss_layer(x)
     print(y.shape)
 
+  def test_funnel_transformer_loss_layer_full(self):
+    vocab_size = 7
+    n_classes = 10
+    loss_layer = ft.FunnelGenClsLoss()
+    x = np.ones((1,4*4*3,vocab_size)), np.ones((1, n_classes)),\
+        np.ones((1,4*4*3)), np.ones((1, 4*4*3)), np.ones((1, n_classes)), np.ones((1, n_classes))
+
+    _, _ = loss_layer.init(shapes.signature(x))
+    y = loss_layer(x)
+    print(y.shape)
+
 
 if __name__ == '__main__':
   absltest.main()

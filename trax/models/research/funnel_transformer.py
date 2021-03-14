@@ -571,8 +571,8 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
 
 @gin.configurable()
 def FunnelGenClsLoss():
-  gen_loss = [tl.Select([0], n_in=2), tl.WeightedCategoryCrossEntropy()]
-  cls_loss = [tl.Select([1], n_in=2), tl.WeightedCategoryCrossEntropy()]
+  gen_loss = [tl.Select([0, 2, 3], n_in=6), tl.WeightedCategoryCrossEntropy()]
+  cls_loss = [tl.Select([1, 4, 5], n_in=6), tl.WeightedCategoryCrossEntropy()]
   return tl.Serial(tl.Branch(gen_loss, cls_loss), tl.WeightedAdd(1.0))
 
 @gin.configurable()
