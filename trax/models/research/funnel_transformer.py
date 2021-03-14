@@ -575,6 +575,12 @@ def FunnelGenClsLoss():
   cls_loss = [tl.Select([1], n_in=2), tl.WeightedCategoryCrossEntropy()]
   return tl.Serial(tl.Branch(gen_loss, cls_loss), tl.WeightedAdd(1.0))
 
+@gin.configurable()
+def FunnelGenClsLossPrl():
+  gen_loss = tl.WeightedCategoryCrossEntropy()
+  cls_loss = tl.WeightedCategoryCrossEntropy()
+  return tl.Serial(tl.Parallel(gen_loss, cls_loss), tl.WeightedAdd(1.0))
+
 def FunnelTransformerLM(vocab_size,
                         d_model=512,
                         d_ff=2048,

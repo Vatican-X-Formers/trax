@@ -181,6 +181,22 @@ class FunnelTransformerTest(parameterized.TestCase):
         self.assertEqual(y_2.shape[0], input_shape[1])
         np.testing.assert_array_almost_equal(y_1[:i+1], y_2[:i+1])
 
+  def test_funnel_transformer_loss_layer(self):
+    vocab_size = 7
+    loss_layer = ft.FunnelGenClsLoss()
+    x = np.ones((1,4*4*3,vocab_size)), np.ones((1, 10)), np.ones((1,4*4*3)), np.ones((1, 4*4*3))
+    _, _ = loss_layer.init(shapes.signature(x))
+    y = loss_layer(x)
+    print(y.shape)
+
+  def test_funnel_transformer_loss_layer_prl(self):
+    vocab_size = 7
+    loss_layer = ft.FunnelGenClsLossPrl()
+    x = np.ones((1,4*4*3,vocab_size)), np.ones((1, 10)), np.ones((1,4*4*3)), np.ones((1, 4*4*3))
+    _, _ = loss_layer.init(shapes.signature(x))
+    y = loss_layer(x)
+    print(y.shape)
+
 
 if __name__ == '__main__':
   absltest.main()
