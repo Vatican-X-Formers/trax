@@ -152,11 +152,24 @@ def _shuffle_data(dataset, target_names, training, shuffle_buffer_size,
 
   def append_targets(example):
     """Append targets to the example dictionary. Needed for Keras."""
+    print('dupa')
     if len(target_names) == 1:
-      return (example, example[target_names[0]])
+      print('dupa')
+      fst_target = target_names[0]
+      if all(not isinstance(fst_target, T) for T in [list, tuple]):
+        print('jest git i zwracam ', target_names[0])
+        return (example, example[target_names[0]])
+      else:
+        print('jednak jest lista albo tuple: ', fst_target)
+        target_iter = fst_target
+    else:
+        target_iter = target_names
     targets = {}
-    for name in target_names:
+    for name in target_iter:
+      print('name in iter', name)
       targets[name] = example[name]
+    print('ex', example)
+    print('target', targets)
     return (example, targets)
 
   # `bare_preprocess_fn` is called before appending targets etc.
