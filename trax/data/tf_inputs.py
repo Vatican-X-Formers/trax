@@ -586,8 +586,8 @@ def cifar10_gen_cls(dataset, training):
   def flat_image(features, targets):
     img = features['image']
     flat = tf.cast(tf.reshape(img, [-1]), tf.int64)
-    new_features = {'image': flat}
-    return new_features, targets
+    features['image'] = flat
+    return features, targets
 
   dataset = dataset.map(cast_image)
   dataset = dataset.map(flat_image)

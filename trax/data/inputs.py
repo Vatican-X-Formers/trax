@@ -831,12 +831,18 @@ def add_loss_weights(generator, id_to_mask=None):
   """
   for example in generator:
     print('example in add_loss_weights', example)
-    assert(len(example) == 2)
-    weights_image = np.ones_like(example[1][0]['image']).astype(np.float32)
-    weights_label = np.ones_like(example[1][0]['label']).astype(np.float32)
-    weights = {'image' : weights_image, 'label': weights_label}
-    output = (example[0], example[1][0], weights)
-    yield output
+    if len(example) > 3 or len(example) < 2:
+      assert id_to_mask is None, 'Cannot automatically mask this stream.'
+      yield example
+    else:
+      if len(example) == 2:
+        weights = np.ones_like(example[1]).astype(np.float32)
+      else:
+        weights = example[2].astype(np.float32)
+      mask = 1.0 - np.equal(example[1], id_to_mask).astype(np.float32)
+      weights *= mask
+      output = (example[0], example[1], weights)
+      yield output
 
 
 def AddLossWeights(id_to_mask=None):  # pylint: disable=invalid-name
