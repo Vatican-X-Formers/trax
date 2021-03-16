@@ -22,7 +22,7 @@ Language Processing https://arxiv.org/abs/2006.03236
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
-from trax.layers import core
+from trax.layers import core, base, PrintShape
 from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer
@@ -30,6 +30,8 @@ from trax.models.research.configurable_transformer import PositionalEncoder
 from trax.models.transformer import _EncoderBlock
 from trax.models.transformer import _FeedForwardBlock
 from trax.models.reformer.reformer import DecoderBlock
+from trax import fastmath
+
 
 @assert_shape('bld->bSd')
 def PoolLayer(pool_layer=tl.AvgPool,
@@ -490,7 +492,8 @@ def _UpsamplerLM(shorten_factor, d_model):
       tl.Dense(shorten_factor * d_model),
       tl.Fn(
           'ProlongBack',
-          lambda x: jnp.reshape(  # Prolong back.  # pylint: disable=g-long-lambda
+          lambda x: jnp.reshape(
+              # Prolong back.  # pylint: disable=g-long-lambda
               x, (x.shape[0], x.shape[1] * shorten_factor, -1)),
           n_out=1),
   )
@@ -500,7 +503,8 @@ def _DownsamplerLM(shorten_factor, d_model):
   return tl.Serial(
       tl.Fn(
           'Shorten',
-          lambda x: jnp.reshape(  # Shorten -- move to depth.  # pylint: disable=g-long-lambda
+          lambda x: jnp.reshape(
+              # Shorten -- move to depth.  # pylint: disable=g-long-lambda
               x, (x.shape[0], x.shape[1] // shorten_factor, -1)),
           n_out=1),
       tl.Dense(d_model))
@@ -764,7 +768,7 @@ def RelformerLM(vocab_size,
     A Transformer language model as a layer that maps from a tensor of tokens
     to activations over a vocab set.
   """
-  assert mode != 'predict'  # For now, 'predict' mode is unsupported.
+  # assert mode != 'predict'  # For now, 'predict' mode is unsupported.
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
@@ -828,14 +832,129 @@ def RelformerLM(vocab_size,
       positional_encoder,
       pre_decoder_blocks,        # vecs
       tl.Dup(),
-      tl.ShiftRight(n_positions=shorten_factor - 1),
+      RelformerCacher(total_kv_pooling=shorten_factor,
+                      n_raw_tokens_generated=1,
+                      max_inference_length=64 * 64 * 3,
+                      shift=shorten_factor-1,
+                      mode=mode),
+      tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
       _DownsamplerLM(shorten_factor, d_model),
       relative_decoder_blocks,
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       _UpsamplerLM(shorten_factor, d_model),
       tl.LayerNorm(),
+      RelformerPicker(total_kv_pooling=shorten_factor,
+                      n_raw_tokens_generated=1,
+                      mode=mode),
       tl.Concatenate(),
+      RelformerCacher(total_kv_pooling=shorten_factor,
+                      n_raw_tokens_generated=1,
+                      max_inference_length=64 * 64 * 3,
+                      shift=shorten_factor - 1,
+                      sliding=True,
+                      mode=mode),
       conv_layer,
+      PickLastTokenInPredict(mode=mode),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
+
+
+class RelformerCacher(base.Layer):
+  def __init__(self, total_kv_pooling, n_raw_tokens_generated=1,
+               max_inference_length=64 * 64 * 3,
+               shift=0, sliding=False, mode='train'):
+    """Returns a new RelformerCacher instance.
+
+    Args:
+      mode: One of `'train'`, `'eval'`, or `'predict'`.
+    """
+    super().__init__(n_in=1, n_out=1)
+    self._total_kv_pooling = total_kv_pooling
+    self._n_raw_tokens_generated = n_raw_tokens_generated
+    self._max_len = max_inference_length
+    self._shift = shift
+    self._sliding = sliding
+    self._mode = mode
+
+  def forward(self, inputs):
+    """Returns attention-computed activations and unmodified mask.
+
+    Args:
+      inputs: A (location_bias, context_bias, pos_emb, q, k, v, mask) tuple.
+    """
+
+    if self._mode != 'predict':
+      return inputs
+    return self.update_state(inputs=inputs)
+
+  def init_weights_and_state(self, input_signature):
+    """Initializes this layer for fast inference, if in ``'predict'`` mode."""
+    if self._mode == 'predict':
+      shape, dtype = input_signature.as_tuple()
+      batch_size, _, d_feature = shape
+      cache = jnp.zeros((batch_size, self._max_len, d_feature),
+                         dtype=dtype)
+      self.state = cache, jnp.array(0)
+
+  def update_state(self, inputs):
+    cache, idx = self.state
+    cache = fastmath.dynamic_update_slice_in_dim(cache,
+                                                 inputs,
+                                                 idx + self._shift,
+                                                 axis=1)
+
+    left_index = idx if self._sliding else idx - (idx%self._total_kv_pooling)
+
+    output = fastmath.dynamic_slice(cache,
+                                    [0, left_index, 0],
+                                    [cache.shape[0], self._total_kv_pooling,
+                                     cache.shape[2]])
+    self.state = cache, idx + inputs.shape[1]
+    return output
+
+
+class RelformerPicker(base.Layer):
+  def __init__(self, total_kv_pooling, n_raw_tokens_generated=1, mode='train'):
+    """Returns a new RelformerCacher instance.
+
+    Args:
+      mode: One of `'train'`, `'eval'`, or `'predict'`.
+    """
+    super().__init__(n_in=1, n_out=1)
+    self._total_kv_pooling = total_kv_pooling
+    self._n_raw_tokens_generated = n_raw_tokens_generated
+    self._mode = mode
+
+  def forward(self, inputs):
+    """Returns attention-computed activations and unmodified mask.
+
+    Args:
+      inputs: A (location_bias, context_bias, pos_emb, q, k, v, mask) tuple.
+    """
+
+    if self._mode != 'predict':
+      return inputs
+
+    output = fastmath.dynamic_slice(inputs,
+                                    [0, self.state, 0],
+                                    [inputs.shape[0],
+                                     self._n_raw_tokens_generated,
+                                     inputs.shape[2]])
+    self.state = (self.state + self._n_raw_tokens_generated) % \
+                 self._total_kv_pooling
+    return output
+
+  def init_weights_and_state(self, input_signature):
+    """Initializes this layer for fast inference, if in ``'predict'`` mode."""
+    if self._mode == 'predict':
+      self.state = jnp.array(0)
+
+
+def PickLastTokenInPredict(mode='train'):
+  def last_token(x):
+    if mode == 'predict':
+      return x[:, -1:, :]
+    return x
+
+  return tl.Fn('ShiftRightCls()', last_token)

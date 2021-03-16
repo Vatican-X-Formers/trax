@@ -24,6 +24,8 @@ from trax import fastmath
 from trax import layers as tl
 from trax import shapes
 import trax.models.research.funnel_transformer as ft
+import gin
+from trax.models.reformer.reformer import ReformerLM
 
 
 class FunnelTransformerTest(parameterized.TestCase):
@@ -180,6 +182,112 @@ class FunnelTransformerTest(parameterized.TestCase):
         y_2 = _get_output_logits(model, masked_x_2)
         self.assertEqual(y_2.shape[0], input_shape[1])
         np.testing.assert_array_almost_equal(y_1[:i+1], y_2[:i+1])
+
+  def test_funnel_transformer_lm_forward_shape_predict(self):
+    d_model = 8
+    vocab_size = 7
+    batch_size = 1
+    x = np.ones((batch_size, 1)).astype(np.int32)
+    # gin.bind_parameter('trax.layers.SelfAttention.chunk_len', 20)
+    simple_funnel = ft.RelformerLM(
+        vocab_size,
+        shorten_factor=3,
+        n_rel_layers=1,
+        vanilla_layers=(1, 1),
+        d_model=d_model, d_ff=d_model, n_heads=2,
+        vanilla_attn_type=tl.LSHSelfAttention,
+        mode='predict'
+    )
+
+    _, _ = simple_funnel.init(shapes.signature(x))
+
+    for _ in range(10):
+      y = simple_funnel(x)
+      self.assertEqual(y.shape, (batch_size, 1, vocab_size))
+
+  def test_funnel_transformer_lm_predict_eval(self):
+    d_model = 64
+    vocab_size = 4
+    batch_size = 2
+    n_len_predict = 1
+    n_len_eval = 128 * 3
+
+    eval_funnel = ft.RelformerLM(
+        vocab_size,
+        shorten_factor=3,
+        n_rel_layers=1,
+        vanilla_layers=(1, 1),
+        d_model=d_model, d_ff=d_model, n_heads=2,
+        vanilla_attn_type=tl.LSHSelfAttention,
+        mode='eval'
+    )
+
+    rng_1 = jax.random.PRNGKey(0)
+
+    x = np.zeros((batch_size, n_len_eval)).astype(np.int32)
+    _, _ = eval_funnel.init(shapes.signature(x), rng=rng_1, use_cache=False)
+    y_eval = eval_funnel(x)
+    self.assertEqual(y_eval.shape, (batch_size, n_len_eval, vocab_size))
+
+    # gin.bind_parameter('trax.layers.SelfAttention.chunk_len', 2137)
+    predict_funnel = ft.RelformerLM(
+        vocab_size,
+        shorten_factor=3,
+        n_rel_layers=1,
+        vanilla_layers=(1, 1),
+        d_model=d_model, d_ff=d_model, n_heads=2,
+        vanilla_attn_type=tl.LSHSelfAttention,
+        mode='predict'
+    )
+
+    x = np.zeros((batch_size, n_len_predict)).astype(np.int32)
+    _, _ = predict_funnel.init(shapes.signature(x), rng=rng_1, use_cache=False)
+
+    for i in range(60):
+      y = predict_funnel(x)
+      np.testing.assert_array_almost_equal(y,
+                                           y_eval[:, i:i+1, :],
+                                           decimal=1)
+      print(f'{i} test passed')
+
+  def test_reformer_transformer_lm_predict_eval(self):
+    d_model = 64
+    vocab_size = 4
+    batch_size = 2
+    n_len_predict = 1
+    n_len_eval = 128 * 3
+
+    eval_funnel = ReformerLM(
+        vocab_size,
+        attention_type=tl.LSHSelfAttention,
+        d_model=d_model, d_ff=d_model, n_heads=2,
+        mode='eval'
+    )
+
+    rng_1 = jax.random.PRNGKey(0)
+
+    x = np.zeros((batch_size, n_len_eval)).astype(np.int32)
+    _, _ = eval_funnel.init(shapes.signature(x), rng=rng_1, use_cache=False)
+    y_eval = eval_funnel(x)
+    self.assertEqual(y_eval.shape, (batch_size, n_len_eval, vocab_size))
+
+    # gin.bind_parameter('trax.layers.SelfAttention.chunk_len', 2137)
+    predict_funnel = ReformerLM(
+        vocab_size,
+        attention_type=tl.LSHSelfAttention,
+        d_model=d_model, d_ff=d_model, n_heads=2,
+        mode='predict'
+    )
+
+    x = np.zeros((batch_size, n_len_predict)).astype(np.int32)
+    _, _ = predict_funnel.init(shapes.signature(x), rng=rng_1, use_cache=False)
+
+    for i in range(60):
+      y = predict_funnel(x)
+      np.testing.assert_array_almost_equal(y,
+                                           y_eval[:, i:i+1, :],
+                                           decimal=1)
+      print(f'{i} test passed')
 
 
 if __name__ == '__main__':
