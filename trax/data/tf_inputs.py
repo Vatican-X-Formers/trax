@@ -101,6 +101,7 @@ def data_streams(dataset_name,
                                   eval_holdout_size, input_name, target_name))
 
     (train_ds, eval_ds, input_name_c) = cache[0]
+    print('internal stream jazda', next(fastmath.dataset_as_numpy(train_ds))[0])
     dataset = eval_ds if which == 'eval' else train_ds
     return dataset_to_stream(dataset, input_name_c)
 
@@ -112,8 +113,10 @@ def data_streams(dataset_name,
 def dataset_to_stream(dataset, input_name):
   """Takes a tf.Dataset and creates a numpy stream of ready batches."""
   # All input-pipeline processing should be on CPU.
+  print('input name to', input_name)
   for example in fastmath.dataset_as_numpy(dataset):
     features = example[0]
+    print(f'dataset_to_stream... with len {len(example)}', example)
     inp, out = features[input_name], example[1]
     mask = features['mask'] if 'mask' in features else None
     # Some accelerators don't handle uint8 well, cast to int.

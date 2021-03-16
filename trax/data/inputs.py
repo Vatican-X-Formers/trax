@@ -830,18 +830,13 @@ def add_loss_weights(generator, id_to_mask=None):
     Examples from the augmented stream.
   """
   for example in generator:
-    if len(example) > 3 or len(example) < 2:
-      assert id_to_mask is None, 'Cannot automatically mask this stream.'
-      yield example
-    else:
-      if len(example) == 2:
-        weights = np.ones_like(example[1]).astype(np.float32)
-      else:
-        weights = example[2].astype(np.float32)
-      mask = 1.0 - np.equal(example[1], id_to_mask).astype(np.float32)
-      weights *= mask
-      output = (example[0], example[1], weights)
-      yield output
+    print('example in add_loss_weights', example)
+    assert(len(example) == 2)
+    weights_image = np.ones_like(example[1][0]['image']).astype(np.float32)
+    weights_label = np.ones_like(example[1][0]['label']).astype(np.float32)
+    weights = {'image' : weights_image, 'label': weights_label}
+    output = (example[0], example[1][0], weights)
+    yield output
 
 
 def AddLossWeights(id_to_mask=None):  # pylint: disable=invalid-name
@@ -1015,6 +1010,8 @@ def batch_fn(dataset, training, n_devices, variable_shapes,
              buckets_include_inputs_in_length=False,
              batch_shuffle_size=None, max_eval_length=None,
              id_to_mask=None, strict_pad_on_len=False):
+  pryk = next(dataset)
+  print('olaboga batcher jazda', len(pryk[0]), pryk)
   """Batching function."""
   # TODO(lukaszkaiser, jonni): revisit arguments, their semantics and naming.
   # After that, create a proper doc-string; we may also not need to pass both
@@ -1032,7 +1029,7 @@ def batch_fn(dataset, training, n_devices, variable_shapes,
     if variable_shapes:
       buckets = _buckets_for_length(
           bucket_length, cur_batch_size, max_eval_length, n_devices, training)
-
+  print('buckets', buckets)
   if buckets:
     logging.info('Bucketing with buckets %s.', str(buckets))
     def example_length(x):
@@ -1051,7 +1048,9 @@ def batch_fn(dataset, training, n_devices, variable_shapes,
   else:
     logging.info('Not Bucketing cur_batch_size %d.', cur_batch_size)
     dataset = batch(dataset, cur_batch_size)
+    print('dataset po batchu', next(dataset))
   if training and batch_shuffle_size is not None:
+    print('if training and batch_shuffle_size is not None')
     dataset = shuffle(dataset, batch_shuffle_size)
   return add_loss_weights(dataset, id_to_mask)
 
