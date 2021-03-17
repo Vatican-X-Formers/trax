@@ -47,6 +47,7 @@ from trax.layers.assert_shape import assert_shape
 from trax.layers.attention import MergeHeads
 from trax.layers.attention import SplitIntoHeads
 
+
 # Layers are always CamelCase, but functions in general are snake_case
 # pylint: disable=invalid-name
 
@@ -101,9 +102,19 @@ def RelativeAttentionLayer(d_feature,
           PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling,
                                n_raw_tokens_generated=n_raw_tokens_generated,
                                max_inference_length=max_inference_length,
+                               mode='raw'),
+          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling,
+                               n_raw_tokens_generated=n_raw_tokens_generated,
+                               max_inference_length=max_inference_length,
+                               mode='raw'),
+          PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling,
+                               n_raw_tokens_generated=n_raw_tokens_generated,
+                               max_inference_length=max_inference_length,
                                mode=mode),
           cb.Select([0]), cb.Select([1])),
       cb.Parallel(
+          core.Dense(d_feature),
+          core.Dense(d_feature),
           core.Dense(d_feature),
           core.Dense(d_feature),
           core.Dense(d_feature),
@@ -215,7 +226,7 @@ class RelativeAttention(base.Layer):
         modes.
       mode: One of `'train'`, `'eval'`, or `'predict'`.
     """
-    super().__init__(n_in=7, n_out=2)
+    super().__init__(n_in=9, n_out=2)
     self._total_kv_pooling = total_kv_pooling
     self._separate_cls = separate_cls
     self._n_heads = n_heads
@@ -230,7 +241,8 @@ class RelativeAttention(base.Layer):
     Args:
       inputs: A (location_bias, context_bias, pos_emb, q, k, v, mask) tuple.
     """
-    location_bias, context_bias, pos_emb, q, k, v, mask = inputs
+    location_bias, context_bias, q_abs_pos_emb, k_abs_pos_emb, pos_emb, \
+      q, k, v, mask = inputs
 
     d_feature = q.shape[-1]
     n_heads = self._n_heads
@@ -247,6 +259,8 @@ class RelativeAttention(base.Layer):
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(q),
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(k),
         SplitIntoHeads(n_heads, merged_batch_and_head=False).forward(v),
+        q_abs_pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
+        k_abs_pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
         pos_emb.reshape((-1, n_heads, d_feature // n_heads)),
         context_bias,
         location_bias,
@@ -317,7 +331,8 @@ class RelativeAttention(base.Layer):
     self.state = ks, vs, idx + self._n_raw_tokens_generated
 
 
-def DotProductAttention(queries, keys, values, pos_emb, context_bias,
+def DotProductAttention(queries, keys, values, q_abs_pos_emb, k_abs_pos_emb,
+                        pos_emb, context_bias,
                         location_bias, mask, separate_cls, dropout, mode, rng):
   """Computes new activations via masked attention-weighted sum of values.
 
@@ -360,7 +375,10 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     bd = bd.at[:, :, :, 0].set(0)
     bd = bd.at[:, :, 0, :].set(0)
 
-  dots = (ac + bd) / jnp.sqrt(d_feature)
+  absolute_attention_score = jnp.einsum('ind,jnd->nij',
+                                        q_abs_pos_emb, k_abs_pos_emb)
+
+  dots = (ac + bd + absolute_attention_score) / jnp.sqrt(d_feature)
   if mask is not None:
     dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
   # Softmax.
@@ -384,6 +402,7 @@ class PositionalEmbeddings(base.Layer):
   for relative attention calculations.
 
   """
+
   def __init__(self, d_feature, separate_cls, total_kv_pooling,
                n_raw_tokens_generated=1, max_inference_length=3072,
                mode='train'):
@@ -396,7 +415,7 @@ class PositionalEmbeddings(base.Layer):
           through this layer. Used only in 'predict' non-training mode.
         max_inference_length: Maximum sequence length allowed in non-training
             modes.
-        mode: One of `'train'`, `'eval'`, or `'predict'`.
+        mode: One of `'train'`, `'eval'`, or `'predict' or 'raw`.
       Returns:
         Positional embedding.
     """
@@ -421,6 +440,12 @@ class PositionalEmbeddings(base.Layer):
       positions = jnp.arange(0, self._max_len, 1.0) - cur_token
       positions = positions * self._total_kv_pooling
       self.state += self._n_raw_tokens_generated
+      return positions
+
+    if self._mode == 'raw':
+      assert queries.shape == keys.shape
+      keys_len, queries_len = keys.shape[1], queries.shape[1]
+      positions = jnp.arange(0, queries_len, 1.0)
       return positions
 
     is_funnel_layer = queries.shape != keys.shape
