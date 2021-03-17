@@ -433,7 +433,8 @@ def _get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
 
 def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
                           mode, ff_activation, context_bias_layer,
-                          location_bias_layer, total_pooling):
+                          location_bias_layer, total_pooling,
+                          max_inference_length=3072):
   """Returns a list of layers that implements a Transformer encoder block.
 
   The input to the block is a pair, (activations, mask), where the mask was
@@ -466,7 +467,8 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
   attention = RelativeAttentionLMLayer(
       d_model, context_bias_layer, location_bias_layer,
       total_pooling,
-      n_heads=n_heads, dropout=dropout, mode=mode)
+      n_heads=n_heads, dropout=dropout,
+      max_inference_length=max_inference_length, mode=mode)
 
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
@@ -862,7 +864,8 @@ def RelformerLM(vocab_size,
     vanilla_attn_type: class: attention class such as SelfAttention to use in
         the layers before and after shortening (vanilla layers).
     pos_type: string, the type of positional embeddings to use.
-    max_len: int: maximum symbol length for positional encoding
+    max_len: int: maximum symbol length both for positional encoding and it is
+      also the maximum length of the possible inference in 'predict' mode
     n_raw_tokens_generated: int: number of tokens generated with every pass
       through model in 'predict' mode. Number of tokens should be smaller and
       divisible by the first shorten factor we are using in the model.
@@ -893,7 +896,7 @@ def RelformerLM(vocab_size,
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                               dropout_shared_axes, mode, ff_activation,
                               context_bias_layer, location_bias_layer,
-                              total_pooling)
+                              total_pooling, max_len)
         for _ in range(n_layers)]
     return decoder_blocks + [tl.LayerNorm()]
 

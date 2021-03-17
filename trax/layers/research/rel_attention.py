@@ -60,7 +60,7 @@ def RelativeAttentionLayer(d_feature,
                            n_heads=1,
                            dropout=0.0,
                            n_raw_tokens_generated=1,
-                           max_inference_length=64 * 64 * 3,
+                           max_inference_length=3072,
                            mode='train'):
   """Returns a layer that maps (q, k, v, masks) to (activations, masks).
 
@@ -132,7 +132,7 @@ def RelativeAttentionLMLayer(d_feature,
                              n_heads=1,
                              dropout=0.0,
                              n_raw_tokens_generated=1,
-                             max_inference_length=64 * 64 * 3,
+                             max_inference_length=3072,
                              mode='train'):
   """Returns a layer that maps (q, k, v) to (activations).
 
@@ -199,7 +199,7 @@ class RelativeAttention(base.Layer):
   """
 
   def __init__(self, total_kv_pooling, separate_cls, n_heads=1, dropout=0.0,
-               n_raw_tokens_generated=1, max_inference_length=64 * 64 * 3,
+               n_raw_tokens_generated=1, max_inference_length=3072,
                mode='train'):
     """Returns a new PureAttention instance.
 
@@ -385,7 +385,7 @@ class PositionalEmbeddings(base.Layer):
 
   """
   def __init__(self, d_feature, separate_cls, total_kv_pooling,
-               n_raw_tokens_generated=1, max_inference_length=64 * 64 * 3,
+               n_raw_tokens_generated=1, max_inference_length=3072,
                mode='train'):
     """
       Args:
@@ -542,7 +542,7 @@ class AttentionMaskLayer(base.Layer):
   """
 
   def __init__(self, total_kv_pooling=1, n_raw_tokens_generated=1,
-               max_inference_length=64 * 64 * 3, mode='train'):
+               max_inference_length=3072, mode='train'):
     super().__init__(n_in=3, n_out=4)
     self._total_kv_pooling = total_kv_pooling
     self._max_len = max_inference_length
