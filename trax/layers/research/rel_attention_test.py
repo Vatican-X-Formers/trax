@@ -96,7 +96,7 @@ class RelAttentionTest(absltest.TestCase):
                                        [-3., -1.]]]])
 
   def test_create_mask_layer_downsample(self):
-    layer = ra.CreateAttentionMaskLayer()
+    layer = ra.AttentionMaskLayer()
     xs = _get_xs(q=2, k=4)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
@@ -105,7 +105,7 @@ class RelAttentionTest(absltest.TestCase):
                                                  [True, True, True, True]]]])
 
   def test_create_mask_layer_upsample(self):
-    layer = ra.CreateAttentionMaskLayer()
+    layer = ra.AttentionMaskLayer()
     xs = _get_xs(q=4, k=2)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
@@ -116,7 +116,7 @@ class RelAttentionTest(absltest.TestCase):
                                                  [True, True]]]])
 
   def test_create_mask_layer(self):
-    layer = ra.CreateAttentionMaskLayer()
+    layer = ra.AttentionMaskLayer()
     xs = _get_xs(q=2, k=2)
     layer.init(shapes.signature(xs))
     _, _, _, mask = layer(xs)
@@ -125,7 +125,7 @@ class RelAttentionTest(absltest.TestCase):
                                                  [True, True]]]])
 
   def test_create_mask_layer_predict(self):
-    layer = ra.CreateAttentionMaskLayer(total_kv_pooling=2,
+    layer = ra.AttentionMaskLayer(total_kv_pooling=2,
                                         n_raw_tokens_generated=1,
                                         max_inference_length=3,
                                         mode='predict')
