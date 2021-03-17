@@ -952,8 +952,8 @@ class RelformerPicker(tl.Layer):
                                     [inputs.shape[0],
                                      self._n_raw_tokens_generated,
                                      inputs.shape[2]])
-    self.state = (self.state + self._n_raw_tokens_generated) % \
-                 self._total_kv_pooling
+    self.state = (self.state + self._n_raw_tokens_generated
+                  ) % self._total_kv_pooling
     return output
 
   def init_weights_and_state(self, input_signature):

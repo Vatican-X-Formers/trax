@@ -591,8 +591,7 @@ class CreateAttentionMaskLayer(base.Layer):
       # We cannot generate more than one token because it contradicts
       # all autoregressive properties
       assert queries_len == 1
-      mask = jnp.arange(self._max_len) <= \
-             (self.state // self._total_kv_pooling)
+      mask = jnp.arange(self._max_len) <= (self.state // self._total_kv_pooling)
       mask = jnp.reshape(mask, (1, 1, 1, self._max_len))
       mask = jnp.repeat(mask, batch_size, axis=0)
       self.state += self._n_raw_tokens_generated
