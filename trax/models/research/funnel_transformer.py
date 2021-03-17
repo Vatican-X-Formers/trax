@@ -705,6 +705,110 @@ def FunnelTransformerLM(vocab_size,
   )
 
 
+class RelformerCacher(tl.Layer):
+  """
+    A class for caching tokens going through model to provide fast inference
+    for Relformer model.
+  """
+
+  def __init__(self, total_kv_pooling, n_raw_tokens_generated=1,
+               max_inference_length=64 * 64 * 3,
+               shift=0, sliding=False, mode='train'):
+    super().__init__(n_in=1, n_out=1)
+    self._total_kv_pooling = total_kv_pooling
+    self._n_raw_tokens_generated = n_raw_tokens_generated
+    self._max_len = max_inference_length
+    self._shift = shift
+    self._sliding = sliding
+    self._mode = mode
+
+  def forward(self, inputs):
+    if self._mode != 'predict':
+      return inputs
+    return self.update_state(inputs=inputs)
+
+  def init_weights_and_state(self, input_signature):
+    if self._mode == 'predict':
+      shape, dtype = input_signature.as_tuple()
+      batch_size, _, d_feature = shape
+      cache = jnp.zeros((batch_size, 2 * self._total_kv_pooling, d_feature),
+                        dtype=dtype)
+      self.state = cache, jnp.array(0)
+
+  def update_state(self, inputs):
+    cache, idx = self.state
+    cache = fastmath.dynamic_update_slice_in_dim(
+        cache,
+        inputs,
+        (idx + self._shift) % (2 * self._total_kv_pooling),
+        axis=1)
+
+    if self._sliding:
+      cache = fastmath.dynamic_update_slice_in_dim(
+          cache,
+          inputs,
+          (idx + self._total_kv_pooling * 2 - 1) % (2 * self._total_kv_pooling),
+          axis=1)
+
+    if self._sliding:
+      left_index = idx % self._total_kv_pooling
+    else:
+      left_index = idx - (idx % self._total_kv_pooling) % \
+                   (2 * self._total_kv_pooling)
+
+    output = fastmath.dynamic_slice(cache,
+                                    [0, left_index, 0],
+                                    [cache.shape[0], self._total_kv_pooling,
+                                     cache.shape[2]])
+
+    self.state = cache, idx + self._n_raw_tokens_generated
+    return output
+
+
+class RelformerPicker(tl.Layer):
+  """
+    A class for picking tokens going through model to provide fast inference
+    for Relformer model.
+  """
+
+  def __init__(self, total_kv_pooling, n_raw_tokens_generated=1, mode='train'):
+    super().__init__(n_in=1, n_out=1)
+    self._total_kv_pooling = total_kv_pooling
+    self._n_raw_tokens_generated = n_raw_tokens_generated
+    self._mode = mode
+
+  def forward(self, inputs):
+    if self._mode != 'predict':
+      return inputs
+
+    output = fastmath.dynamic_slice(inputs,
+                                    [0, self.state, 0],
+                                    [inputs.shape[0],
+                                     self._n_raw_tokens_generated,
+                                     inputs.shape[2]])
+    self.state = (self.state + self._n_raw_tokens_generated
+                  ) % self._total_kv_pooling
+    return output
+
+  def init_weights_and_state(self, input_signature):
+    if self._mode == 'predict':
+      self.state = jnp.array(0)
+
+
+def PickLastTokenInPredict(mode='train'):
+  """
+    Self-descriptive layer for picking last token logits in predict mode
+    for fast inference.
+  """
+
+  def last_token(x):
+    if mode == 'predict':
+      return x[:, -1:, :]
+    return x
+
+  return tl.Fn('Pick last token in predict', last_token)
+
+
 def RelformerLM(vocab_size,
                 d_model=512,
                 d_ff=2048,
@@ -867,109 +971,5 @@ def RelformerLM(vocab_size,
       conv_layer,
       picker_conv,
       post_decoder_blocks,
-      tl.Dense(vocab_size),  # vecs
+      tl.Dense(vocab_size),      # vecs
   )
-
-
-class RelformerCacher(tl.Layer):
-  """
-    A class for caching tokens going through model to provide fast inference
-    for Relformer model.
-  """
-
-  def __init__(self, total_kv_pooling, n_raw_tokens_generated=1,
-               max_inference_length=64 * 64 * 3,
-               shift=0, sliding=False, mode='train'):
-    super().__init__(n_in=1, n_out=1)
-    self._total_kv_pooling = total_kv_pooling
-    self._n_raw_tokens_generated = n_raw_tokens_generated
-    self._max_len = max_inference_length
-    self._shift = shift
-    self._sliding = sliding
-    self._mode = mode
-
-  def forward(self, inputs):
-    if self._mode != 'predict':
-      return inputs
-    return self.update_state(inputs=inputs)
-
-  def init_weights_and_state(self, input_signature):
-    if self._mode == 'predict':
-      shape, dtype = input_signature.as_tuple()
-      batch_size, _, d_feature = shape
-      cache = jnp.zeros((batch_size, 2 * self._total_kv_pooling, d_feature),
-                        dtype=dtype)
-      self.state = cache, jnp.array(0)
-
-  def update_state(self, inputs):
-    cache, idx = self.state
-    cache = fastmath.dynamic_update_slice_in_dim(
-        cache,
-        inputs,
-        (idx + self._shift) % (2 * self._total_kv_pooling),
-        axis=1)
-
-    if self._sliding:
-      cache = fastmath.dynamic_update_slice_in_dim(
-          cache,
-          inputs,
-          (idx + self._total_kv_pooling * 2 - 1) % (2 * self._total_kv_pooling),
-          axis=1)
-
-    if self._sliding:
-      left_index = idx % self._total_kv_pooling
-    else:
-      left_index = idx - (idx % self._total_kv_pooling) % \
-                   (2 * self._total_kv_pooling)
-
-    output = fastmath.dynamic_slice(cache,
-                                    [0, left_index, 0],
-                                    [cache.shape[0], self._total_kv_pooling,
-                                     cache.shape[2]])
-
-    self.state = cache, idx + self._n_raw_tokens_generated
-    return output
-
-
-class RelformerPicker(tl.Layer):
-  """
-    A class for picking tokens going through model to provide fast inference
-    for Relformer model.
-  """
-
-  def __init__(self, total_kv_pooling, n_raw_tokens_generated=1, mode='train'):
-    super().__init__(n_in=1, n_out=1)
-    self._total_kv_pooling = total_kv_pooling
-    self._n_raw_tokens_generated = n_raw_tokens_generated
-    self._mode = mode
-
-  def forward(self, inputs):
-    if self._mode != 'predict':
-      return inputs
-
-    output = fastmath.dynamic_slice(inputs,
-                                    [0, self.state, 0],
-                                    [inputs.shape[0],
-                                     self._n_raw_tokens_generated,
-                                     inputs.shape[2]])
-    self.state = (self.state + self._n_raw_tokens_generated
-                  ) % self._total_kv_pooling
-    return output
-
-  def init_weights_and_state(self, input_signature):
-    if self._mode == 'predict':
-      self.state = jnp.array(0)
-
-
-def PickLastTokenInPredict(mode='train'):
-  """
-    Self-descriptive layer for picking last token logits in predict mode
-    for fast inference.
-  """
-
-  def last_token(x):
-    if mode == 'predict':
-      return x[:, -1:, :]
-    return x
-
-  return tl.Fn('Pick last token in predict', last_token)

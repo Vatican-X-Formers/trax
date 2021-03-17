@@ -171,7 +171,7 @@ def RelativeAttentionLMLayer(d_feature,
       mode=mode)
 
   return cb.Serial(
-      CreateAttentionMaskLayer(
+      AttentionMaskLayer(
           total_kv_pooling=total_kv_pooling,
           n_raw_tokens_generated=n_raw_tokens_generated,
           max_inference_length=max_inference_length,
@@ -525,7 +525,7 @@ def _fast_matrix_shift(x, funnel_factor, is_upsampling=False):
   return x
 
 
-class CreateAttentionMaskLayer(base.Layer):
+class AttentionMaskLayer(base.Layer):
   """Creates attention mask layer.
 
   Returns:
