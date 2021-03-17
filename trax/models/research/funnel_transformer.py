@@ -797,20 +797,6 @@ class RelformerPicker(tl.Layer):
       self.state = jnp.array(0)
 
 
-def PickLastTokenInPredict(mode='train'):
-  """
-    Self-descriptive layer for picking last token logits in predict mode
-    for fast inference.
-  """
-
-  def last_token(x):
-    if mode == 'predict':
-      return x[:, -1:, :]
-    return x
-
-  return tl.Fn('Pick last token in predict', last_token)
-
-
 def RelformerLM(vocab_size,
                 d_model=512,
                 d_ff=2048,
@@ -927,11 +913,6 @@ def RelformerLM(vocab_size,
 
   relative_decoder_blocks = create_decoder_blocks(n_rel_layers, shorten_factor)
 
-  conv_layer = tl.Serial(
-      tl.CausalConv(d_model, shorten_factor),
-      ff_activation()
-  )
-
   post_decoder_blocks = create_reformer_blocks(n_post_decoder_blocks,
                                                dense=False)
 
@@ -944,15 +925,6 @@ def RelformerLM(vocab_size,
   picker = RelformerPicker(total_kv_pooling=shorten_factor,
                            n_raw_tokens_generated=n_raw_tokens_generated,
                            mode=mode)
-
-  cacher_conv = RelformerCacher(total_kv_pooling=shorten_factor,
-                                n_raw_tokens_generated=n_raw_tokens_generated,
-                                max_inference_length=max_len,
-                                shift=shorten_factor - 1,
-                                sliding=True,
-                                mode=mode)
-
-  picker_conv = PickLastTokenInPredict(mode=mode)
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
@@ -969,10 +941,7 @@ def RelformerLM(vocab_size,
       _UpsamplerLM(shorten_factor, d_model),
       tl.LayerNorm(),
       picker,
-      tl.Concatenate(),
-      cacher_conv,
-      conv_layer,
-      picker_conv,
+      tl.Add(),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
