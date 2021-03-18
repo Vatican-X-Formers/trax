@@ -397,6 +397,46 @@ class TrainingTest(absltest.TestCase):
     training_session.run(n_steps=5)
     self.assertEqual(5, training_session.step)
 
+  def test_can_handle_one_input_multi_targett(self):
+    model = tl.Serial(tl.Dense(3), tl.Branch(tl.Dense(1), tl.Dense(2)))
+    train_tasks = [
+        training.TrainTask(
+          _double_simple_data_one_input(1,2),
+          tl.Branch(tl.Select([0, 2, 3], n_in=6), tl.L2Loss(), tl.Select([1, 4, 5], n_in=6), tl.L2Loss()),
+          optimizers.SGD(.01)
+      )
+    ]
+    tmp_dir = self.create_tempdir().full_path
+    training_session = training.Loop(
+        model,
+        tasks=train_tasks,
+        eval_tasks=None,
+        checkpoint_at=lambda step_n: step_n == 1,
+        output_dir=tmp_dir,
+        which_task=lambda step_n: step_n % 2,
+    )
+    training_session.run(n_steps=2)
+
+  def test_can_handle_rep_input_multi_target(self):
+    model = tl.Serial(tl.Dense(3), tl.Branch(tl.Dense(1), tl.Dense(2)))
+    train_tasks = [
+        training.TrainTask(
+          (_very_simple_data(1), _very_simple_data(2)),
+          tl.Branch(tl.Select([0, 2, 3], n_in=6), tl.L2Loss(), tl.Select([1, 4, 5], n_in=6), tl.L2Loss()),
+          optimizers.SGD(.01)
+      )
+    ]
+    tmp_dir = self.create_tempdir().full_path
+    training_session = training.Loop(
+        model,
+        tasks=train_tasks,
+        eval_tasks=None,
+        checkpoint_at=lambda step_n: step_n == 1,
+        output_dir=tmp_dir,
+        which_task=lambda step_n: step_n % 2,
+    )
+    training_session.run(n_steps=2)
+
   def test_can_predict_with_trained_model(self):
     model = tl.Serial(tl.Dense(3), tl.Branch(tl.Dense(1), tl.Dense(2)))
     train_tasks, eval_tasks = [], []
@@ -533,13 +573,23 @@ class TrainingTest(absltest.TestCase):
     self.assertEqual(end_steps, call_at_steps)
 
 
-def _very_simple_data(output_dim=1):
+def _double_simple_data_one_input(output_dim_fst=1, output_dim_snd=1):
+  """"Returns stream of labeled data that maps small integers to constant pi."""
+  inputs_batch = np.arange(8).reshape((8, 1))  # 8 items per batch
+  targets_batch = np.pi * np.ones((8, output_dim_fst)), np.pi * np.ones((8, output_dim_snd))
+  labeled_batch = (inputs_batch, targets_batch, (np.ones_like(targets_batch[0]), np.ones_like(targets_batch[1])))
+  while True:
+    yield labeled_batch
+
+def _very_simple_data(output_dim=1, rep=1):
   """"Returns stream of labeled data that maps small integers to constant pi."""
   inputs_batch = np.arange(8).reshape((8, 1))  # 8 items per batch
   targets_batch = np.pi * np.ones((8, output_dim))
   labeled_batch = (inputs_batch, targets_batch, np.ones_like(targets_batch))
   while True:
-    yield labeled_batch
+    yield (labeled_batch,) * rep
+
+
 
 
 def _very_simple_transformer_data():

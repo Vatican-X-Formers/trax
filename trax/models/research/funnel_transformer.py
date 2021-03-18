@@ -569,6 +569,10 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       ),
   ]
 
+def MultiTargetTrainTask():
+    def __init__():
+        pass
+
 @gin.configurable()
 def FunnelGenClsLoss():
   gen_loss = [tl.Select([0, 2, 3], n_in=6), tl.WeightedCategoryCrossEntropy()]

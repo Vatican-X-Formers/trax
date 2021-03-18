@@ -105,6 +105,8 @@ def data_streams(dataset_name,
     dataset = eval_ds if which == 'eval' else train_ds
     return dataset_to_stream(dataset, input_name_c)
 
+
+  #pomysl - tutaj ich zestackowac??????
   train_stream = lambda: stream('train')
   eval_stream = lambda: stream('eval')
   return train_stream, eval_stream
@@ -579,6 +581,8 @@ def cifar10_no_augmentation_preprocess(dataset, training):
 def cifar10_gen_cls(dataset, training):
   del training
 
+  n_classes = 10
+
   def cast_image(features, targets):
     features['image'] = tf.cast(features['image'], tf.float32) / 255.0
     return features, targets
@@ -587,6 +591,13 @@ def cifar10_gen_cls(dataset, training):
     img = features['image']
     flat = tf.cast(tf.reshape(img, [-1]), tf.int64)
     features['image'] = flat
+    return features, targets
+
+  def one_hot_label(features, targets):
+    idx = features['label']
+    one_hot = np.zeros((n_classes))
+    one_hot[idx] = 1
+    features['label'] = one_hot
     return features, targets
 
   dataset = dataset.map(cast_image)
