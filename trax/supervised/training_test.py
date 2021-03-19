@@ -397,7 +397,7 @@ class TrainingTest(absltest.TestCase):
     training_session.run(n_steps=5)
     self.assertEqual(5, training_session.step)
 
-  def test_can_handle_one_input_multi_targett(self):
+  def test_can_handle_one_input_multi_target(self):
     model = tl.Serial(tl.Dense(3), tl.Branch(tl.Dense(1), tl.Dense(2)))
     train_tasks = [
         training.TrainTask(

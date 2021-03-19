@@ -43,6 +43,8 @@ import pickle
 import random
 import sys
 import time
+from dataclasses import dataclass
+from typing import Callable
 
 from absl import logging
 import gin
@@ -1266,3 +1268,58 @@ def _match_by_shape(full, partial):
       _log('  Tensor in that place has shape: %s' % model_weight_shape)
     raise IndexError
   return res
+
+
+@dataclass
+class TargetHandler:
+    input_name: str,
+    target_name: str,
+    loss_layer,
+    optimizer,
+    preprocess_fn
+
+
+def MultiTargetTrainTask():
+    def __init__(self, dataset_name, target_handlers):
+        self._current_task_idx = -1
+
+        #TODO(mvxxx) extend eval task
+        def create_train_task(handler):
+          _keys = (handler.input_name, handler.target_name)
+
+          train_stream = trax.data.TFDS(dataset_name, keys=_keys, train=True)()
+          # eval_stream = trax.data.TFDS(dataset_name, keys=_keys, train=False)()
+
+          train_data_pipeline = trax.data.Serial(
+              trax.data.Shuffle(),
+              lambda dataset: handler.preprocess_fn(dataset, True),
+              trax.data.AddLossWeights(),
+          )
+
+          # train_data_pipeline = trax.data.Serial(
+          #     lambda dataset: handler.preprocess_fn(dataset, False),
+          #     trax.data.AddLossWeights(),
+          # )
+
+          train_batches_stream = train_data_pipeline(train_stream)
+          # eval_batches_stream = eval_data_pipeline(eval_stream)
+
+          train_task = training.TrainTask(
+              labeled_data=train_batches_stream,
+              loss_layer=handler.loss_layer,
+              optimizer=handler.optimizer,
+              n_steps_per_checkpoint=1000,
+          )
+
+          # eval_task = training.EvalTask(
+          #     labeled_data=eval_batches_stream,
+          #     metrics=[tl.CrossEntropyLoss(), tl.Accuracy()],
+          #     n_eval_batches=20,
+          # )
+
+          return train_task
+
+        self._train_tasks = [create_train_task(handler) for handler in target_handlers]
+
+    def tasks(self):
+      return self._train_tasks
