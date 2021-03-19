@@ -444,13 +444,9 @@ class TrainingTest(absltest.TestCase):
       # The head we select from the model: 0 for output_dim 1 and 1 for 2.
       head_index = output_dim - 1
       train_tasks.append(training.TrainTask(
-          _very_simple_data(output_dim),
-          tl.Serial(tl.Select([head_index], n_in=2), tl.L2Loss()),
+          _very_simple_data(output_dim, output_dim-1),
+          tl.Serial(tl.PrintShape(2, f'Training task {output_dim-1}'), tl.Select([head_index], n_in=2), tl.L2Loss()),
           optimizers.SGD(.01)
-      ))
-      eval_tasks.append(training.EvalTask(
-          _very_simple_data(output_dim),  # deliberately re-use training data
-          [tl.Serial(tl.Select([head_index], n_in=2), tl.L2Loss())]
       ))
     tmp_dir = self.create_tempdir().full_path
     training_session = training.Loop(
@@ -461,7 +457,7 @@ class TrainingTest(absltest.TestCase):
         output_dir=tmp_dir,
         which_task=lambda step_n: step_n % 2,
     )
-    training_session.run(n_steps=2)
+    training_session.run(n_steps=4)
 
     trained_model = training_session.eval_model
     inp = next(_very_simple_data())[0]
@@ -581,15 +577,14 @@ def _double_simple_data_one_input(output_dim_fst=1, output_dim_snd=1):
   while True:
     yield labeled_batch
 
-def _very_simple_data(output_dim=1, rep=1):
+def _very_simple_data(output_dim=1, training_task_idx=0):
   """"Returns stream of labeled data that maps small integers to constant pi."""
   inputs_batch = np.arange(8).reshape((8, 1))  # 8 items per batch
   targets_batch = np.pi * np.ones((8, output_dim))
   labeled_batch = (inputs_batch, targets_batch, np.ones_like(targets_batch))
   while True:
-    yield (labeled_batch,) * rep
-
-
+    print(f'[PRE] Next very simple data for training task {training_task_idx}')
+    yield labeled_batch
 
 
 def _very_simple_transformer_data():
