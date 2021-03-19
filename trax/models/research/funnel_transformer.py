@@ -573,7 +573,8 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
 def FunnelGenClsLoss():
   gen_loss = [tl.Select([0, 2, 3], n_in=6), tl.WeightedCategoryCrossEntropy()]
   cls_loss = [tl.Select([1, 4, 5], n_in=6), tl.WeightedCategoryCrossEntropy()]
-  return tl.Serial(tl.PrintShape(4, 'Funnel loss layer'), tl.Branch(gen_loss, cls_loss), tl.WeightedAdd(1.0))
+#TODO(mvxxx) remove PrintShape - it is just for debug
+  return tl.Serial(tl.PrintShape(6, 'Funnel loss layer'), tl.Branch(gen_loss, cls_loss), tl.WeightedAdd(1.0))
 
 @gin.configurable()
 def FunnelGenClsLossPrl():
