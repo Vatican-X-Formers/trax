@@ -68,7 +68,7 @@ train.checkpoints_at = \
 
 # Parameters for SelfAttention:
 # ==============================================================================
-layers.SelfAttention.chunk_len = 2048
+layers.SelfAttention.chunk_len = 1024
 layers.SelfAttention.n_chunks_after = 0
 layers.SelfAttention.n_chunks_before = 0
 
