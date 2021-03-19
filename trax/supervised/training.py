@@ -1281,7 +1281,6 @@ class TargetHandler:
 
 def MultiTargetTrainTask():
     def __init__(self, dataset_name, target_handlers):
-        self._current_task_idx = -1
 
         #TODO(mvxxx) extend eval task
         def create_train_task(handler):
@@ -1308,13 +1307,11 @@ def MultiTargetTrainTask():
               labeled_data=train_batches_stream,
               loss_layer=handler.loss_layer,
               optimizer=handler.optimizer,
-              n_steps_per_checkpoint=1000,
           )
 
           # eval_task = training.EvalTask(
           #     labeled_data=eval_batches_stream,
           #     metrics=[tl.CrossEntropyLoss(), tl.Accuracy()],
-          #     n_eval_batches=20,
           # )
 
           return train_task
