@@ -56,12 +56,14 @@ import tensorflow as tf
 from trax import fastmath
 from trax import jaxboard
 from trax import layers as tl
+from trax import data as td
+
 from trax import optimizers
 from trax import shapes
-from trax.data import inputs
 from trax.fastmath import numpy as jnp
 from trax.fastmath import random as jax_random
 from trax.supervised import history as trax_history
+from trax.data import inputs
 
 
 _Evaluator = collections.namedtuple(
@@ -747,7 +749,7 @@ class Loop:
     if self._output_dir is None:
       _log('Did not save checkpoint as output_dir is None')
       return
-    inputs.save_data_counters(self._output_dir)
+    td.inputs.save_data_counters(self._output_dir)
     if not self.is_chief:
       _log('Did not save checkpoint as we are not chief.')
       return
@@ -1270,53 +1272,53 @@ def _match_by_shape(full, partial):
   return res
 
 
-# @dataclass
-# class TargetHandler:
-#     input_name: str,
-#     target_name: str,
-#     loss_layer,
-#     optimizer,
-#     preprocess_fn
+@dataclass
+class TargetHandler:
+    input_name: str
+    target_name: str
+    loss_layer: object
+    optimizer: object
+    preprocess_fn: Callable
 
 
-# def MultiTargetTrainTask():
-#     def __init__(self, dataset_name, target_handlers):
+def MultiTargetTrainTask():
+    def __init__(self, dataset_name, target_handlers):
 
-#         #TODO(mvxxx) extend eval task
-#         def create_train_task(handler):
-#           _keys = (handler.input_name, handler.target_name)
+        #TODO(mvxxx) extend eval task
+        def create_train_task(handler, idx, targets_count):
+          _keys = (handler.input_name, handler.target_name)
 
-#           train_stream = trax.data.TFDS(dataset_name, keys=_keys, train=True)()
-#           # eval_stream = trax.data.TFDS(dataset_name, keys=_keys, train=False)()
+          train_stream = td.TFDS(dataset_name, keys=_keys, train=True)()
+          # eval_stream = trax.data.TFDS(dataset_name, keys=_keys, train=False)()
 
-#           train_data_pipeline = trax.data.Serial(
-#               trax.data.Shuffle(),
-#               lambda dataset: handler.preprocess_fn(dataset, True),
-#               trax.data.AddLossWeights(),
-#           )
+          train_data_pipeline = td.Serial(
+              td.Shuffle(),
+              lambda dataset: handler.preprocess_fn(dataset, True),
+              td.AddLossWeights(),
+          )
 
-#           # train_data_pipeline = trax.data.Serial(
-#           #     lambda dataset: handler.preprocess_fn(dataset, False),
-#           #     trax.data.AddLossWeights(),
-#           # )
+          # train_data_pipeline = trax.data.Serial(
+          #     lambda dataset: handler.preprocess_fn(dataset, False),
+          #     trax.data.AddLossWeights(),
+          # )
 
-#           train_batches_stream = train_data_pipeline(train_stream)
-#           # eval_batches_stream = eval_data_pipeline(eval_stream)
+          train_batches_stream = train_data_pipeline(train_stream)
+          # eval_batches_stream = eval_data_pipeline(eval_stream)
 
-#           train_task = training.TrainTask(
-#               labeled_data=train_batches_stream,
-#               loss_layer=handler.loss_layer,
-#               optimizer=handler.optimizer,
-#           )
+          train_task = TrainTask(
+              labeled_data=train_batches_stream,
+              loss_layer=tl.Serial(tl.Select([idx], n_in=targets_count), handler.loss_layer),
+              optimizer=handler.optimizer,
+          )
 
-#           # eval_task = training.EvalTask(
-#           #     labeled_data=eval_batches_stream,
-#           #     metrics=[tl.CrossEntropyLoss(), tl.Accuracy()],
-#           # )
+          # eval_task = training.EvalTask(
+          #     labeled_data=eval_batches_stream,
+          #     metrics=[tl.CrossEntropyLoss(), tl.Accuracy()],
+          # )
 
-#           return train_task
+          return train_task
 
-#         self._train_tasks = [create_train_task(handler) for handler in target_handlers]
+        self._train_tasks = [create_train_task(handler, idx, len(target_handlers)) for idx, handler in enumerate(target_handlers)]
 
-#     def tasks(self):
-#       return self._train_tasks
+    def tasks(self):
+      return self._train_tasks

@@ -583,8 +583,8 @@ def _very_simple_data(output_dim=1, training_task_idx=0):
   targets_batch = np.pi * np.ones((8, output_dim))
   labeled_batch = (inputs_batch, targets_batch, np.ones_like(targets_batch))
   while True:
-    print(f'[PRE] Next very simple data for training task {training_task_idx}')
     yield labeled_batch
+    print(f'[POST] Next very simple data for training task {training_task_idx}')
 
 
 def _very_simple_transformer_data():
