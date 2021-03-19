@@ -1320,14 +1320,15 @@ class MultiTargetTrainTaskTFDS:
               n_eval_batches=1,
           )
 
-          return train_task, eval_task
+          return (train_task, eval_task)
 
         self._tasks = [create_train_task(handler, idx, len(target_handlers)) for idx, handler in enumerate(target_handlers)]
+        print(self._tasks)
 
     @property
     def train_tasks(self):
-      return [train_task for (train_task, eval_task) in zip(self._tasks)]
+      return [train_task for (train_task, eval_task) in self._tasks]
 
     @property
     def eval_tasks(self):
-      return [eval_task for (train_task, eval_task) in zip(self._tasks)]
+      return [eval_task for (train_task, eval_task) in self._tasks]
