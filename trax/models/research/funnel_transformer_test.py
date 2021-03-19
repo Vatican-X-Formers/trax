@@ -248,8 +248,10 @@ class FunnelTransformerTest(parameterized.TestCase):
         vanilla_attn_type=attention_type,
         mode='eval')
 
-    input = np.random.randint(low=0, high=vocab_size,
-                              size=(batch_size, n_len_eval)).astype(np.int32)
+    input = jax.random.randint(key=jax.random.PRNGKey(0),
+                               minval=0,
+                               maxval=vocab_size,
+                               shape=(batch_size, n_len_eval)).astype(np.int32)
     _, _ = eval_funnel.init(shapes.signature(input), rng=jax.random.PRNGKey(0),
                             use_cache=False)
     y_eval = eval_funnel(input)
