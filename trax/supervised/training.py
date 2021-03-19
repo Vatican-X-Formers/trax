@@ -1289,24 +1289,45 @@ class MultiTargetTrainTaskTFDS:
           _keys = (handler.input_name, handler.target_name)
 
           train_stream = td.TFDS(dataset_name, keys=_keys, train=True)()
+          eval_stream = td.TFDS(dataset_name, keys=_keys, train=False)()
+
           train_data_pipeline = td.Serial(
               td.Shuffle(),
+              td.Batch(1),
               lambda dataset: handler.preprocess_fn(dataset, True),
               td.AddLossWeights(),
           )
+
+          eval_data_pipeline = td.Serial(
+              td.Batch(64),
+              lambda dataset: handler.preprocess_fn(dataset, True),
+              td.AddLossWeights(),
+          )
+
+          eval_batches_stream = eval_data_pipeline(eval_stream)
 
           train_batches_stream = train_data_pipeline(train_stream)
 
           train_task = TrainTask(
               labeled_data=train_batches_stream,
-              loss_layer=tl.Serial(tl.Select([idx], n_in=targets_count), handler.loss_layer),
+              loss_layer=tl.Serial(tl.Select([idx-1], n_in=targets_count), handler.loss_layer),
               optimizer=handler.optimizer,
           )
 
-          return train_task
+          eval_task = EvalTask(
+              labeled_data=eval_batches_stream,
+              metrics=[tl.Serial(tl.Select([idx-1], n_in=targets_count), handler.loss_layer)],
+              n_eval_batches=1,
+          )
 
-        self._train_tasks = [create_train_task(handler, idx, len(target_handlers)) for idx, handler in enumerate(target_handlers)]
+          return train_task, eval_task
+
+        self._tasks = [create_train_task(handler, idx, len(target_handlers)) for idx, handler in enumerate(target_handlers)]
 
     @property
-    def tasks(self):
-      return self._train_tasks
+    def train_tasks(self):
+      return [train_task for (train_task, eval_task) in zip(self._tasks)]
+
+    @property
+    def eval_tasks(self):
+      return [eval_task for (train_task, eval_task) in zip(self._tasks)]

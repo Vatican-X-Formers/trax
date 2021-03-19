@@ -580,7 +580,7 @@ def cifar10_no_augmentation_preprocess(dataset, training):
 @gin.configurable(denylist=['dataset', 'training'])
 def cifar10_gen_cls(dataset, training):
   del training
-
+  #print('debug', next(dataset))
   def cast_image(features, targets):
     features['image'] = tf.cast(features['image'], tf.float32) / 255.0
     return features, targets
@@ -591,6 +591,7 @@ def cifar10_gen_cls(dataset, training):
     features['image'] = flat
     return features, targets
 
+  #print('debug', next(dataset))
   dataset = dataset.map(cast_image)
   dataset = dataset.map(flat_image)
 
