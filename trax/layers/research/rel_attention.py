@@ -249,15 +249,10 @@ def DotProductAttention(queries, keys, values, l_emb, r_emb, mask, separate_cls,
   """
   d_feature = queries.shape[-1]
 
-  ac = jnp.einsum('bnid,bnjd->bnij', queries, keys)
-  bd = jnp.einsum('bnid,jnd->bnij', queries + l_emb.swapaxes(0, 1), r_emb)
+  ac = jnp.einsum('bnid,bnjd->bnij', queries + l_emb.swapaxes(0, 1),
+                  keys + r_emb.swapaxes(0, 1))
 
-  if separate_cls:
-    # Masking out location part of attention for cls token
-    bd = bd.at[:, :, :, 0].set(0)
-    bd = bd.at[:, :, 0, :].set(0)
-
-  dots = (ac + bd) / jnp.sqrt(d_feature)
+  dots = ac / jnp.sqrt(d_feature)
   if mask is not None:
     dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
   # Softmax.
