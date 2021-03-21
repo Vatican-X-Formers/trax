@@ -268,6 +268,26 @@ def DotProductAttention(queries, keys, values, l_emb, r_emb, mask, separate_cls,
   return out, dots
 
 
+class SinusoidalEmbeddings(base.Layer):
+  def forward(self, inputs):
+    inv_freq = self.weights
+    sinusoid_freq = jnp.einsum('i,j->ij', inputs, inv_freq)
+    pos_emb = jnp.concatenate(
+        [jnp.sin(sinusoid_freq), jnp.cos(sinusoid_freq)], axis=1)
+    return pos_emb
+
+  def init_weights_and_state(self, input_signature):
+    """Randomly initializes the positional encoding vectors.
+
+    Args:
+      input_signature: :py:class:`ShapeDtype` instance characterizing the input
+          this layer should compute on.
+    """
+    d_feature = input_signature.shape[-1]
+    inv_freq = 1 / (10000**(jnp.arange(0.0, d_feature, 2.0) / d_feature))
+    self.weights = jnp.array(inv_freq)
+
+
 def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
   """Positional embedding for relative attention.
 
@@ -291,17 +311,12 @@ def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
 
     return positions
 
-  def Sinusoidal_Embeddings(positions):
-    inv_freq = 1 / (10000**(jnp.arange(0.0, d_feature, 2.0) / d_feature))
-    sinusoid_freq = jnp.einsum('i,j->ij', positions, inv_freq)
-    pos_emb = jnp.concatenate(
-        [jnp.sin(sinusoid_freq), jnp.cos(sinusoid_freq)], axis=1)
-    return pos_emb
+  sinusoidal_embeddings = SinusoidalEmbeddings()
 
   return cb.Serial(
       cb.Fn('Generate positions vectors', PositionsVectors, n_out=1),
-      cb.Fn(
-          'Transform to sinusoidal encodings', Sinusoidal_Embeddings, n_out=1))
+      sinusoidal_embeddings
+  )
 
 
 def calc_funnel_ratio(keys_len, queries_len):
