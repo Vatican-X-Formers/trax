@@ -269,6 +269,9 @@ def DotProductAttention(queries, keys, values, l_emb, r_emb, mask, separate_cls,
 
 
 class SinusoidalEmbeddings(base.Layer):
+  def __init__(self):
+    super().__init__()
+
   def forward(self, inputs):
     inv_freq = self.weights
     sinusoid_freq = jnp.einsum('i,j->ij', inputs, inv_freq)
