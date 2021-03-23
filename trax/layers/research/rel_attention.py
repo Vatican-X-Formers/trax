@@ -269,8 +269,9 @@ def DotProductAttention(queries, keys, values, l_emb, r_emb, mask, separate_cls,
 
 
 class SinusoidalEmbeddings(base.Layer):
-  def __init__(self):
+  def __init__(self, d_feature):
     super().__init__()
+    self._d_feature = d_feature
 
   def forward(self, inputs):
     inv_freq = self.weights
@@ -286,9 +287,10 @@ class SinusoidalEmbeddings(base.Layer):
       input_signature: :py:class:`ShapeDtype` instance characterizing the input
           this layer should compute on.
     """
-    d_feature = input_signature.shape[-1]
-    inv_freq = 1 / (10000**(jnp.arange(0.0, d_feature, 2.0) / d_feature))
-    self.weights = jnp.array(inv_freq)
+    inv_freq = 1 / (
+          10000 ** (jnp.arange(0.0, self._d_feature, 2.0) / self._d_feature))
+    self.weights = inv_freq
+    print(input_signature, self.weights)
 
 
 def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
@@ -314,7 +316,7 @@ def PositionalEmbeddings(d_feature, separate_cls, total_kv_pooling):
 
     return positions
 
-  sinusoidal_embeddings = SinusoidalEmbeddings()
+  sinusoidal_embeddings = SinusoidalEmbeddings(d_feature=d_feature)
 
   return cb.Serial(
       cb.Fn('Generate positions vectors', PositionsVectors, n_out=1),
