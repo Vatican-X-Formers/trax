@@ -430,6 +430,90 @@ def ConfigurableAttention(q_layer, k_layer, v_layer, final_layer,  # pylint: dis
   )
 
 
+def PositionalEmbeddings():
+  """Positional embedding for relative attention.
+
+  Returns a layer that based on queries, keys and accumulated pool size of
+  keys/values until this layer calculates sinusoidal positional embeddings
+  for relative attention calculations.
+
+  Args:
+    d_model: Depth/dimensionality of feature embedding.
+    separate_cls: True/False if we separate_cls in calculations.
+    total_kv_pooling: Accumulated pool size of keys/values until this layer.
+
+  Returns:
+    Positional embedding.
+  """
+
+  def PositionsVectors(x):
+    n_queries, d_model = x.shape[1:]
+
+    positions = jnp.arange(0, n_queries, 1.0)
+
+    inv_freq = 1 / (10000 ** (jnp.arange(0.0, d_model, 2.0) / d_model))
+    sinusoid_freq = jnp.einsum('i,j->ij', positions, inv_freq)
+    pos_emb = jnp.concatenate(
+        [jnp.sin(sinusoid_freq), jnp.cos(sinusoid_freq)], axis=1)
+    return pos_emb
+
+  return cb.Fn('Generate positions vectors', PositionsVectors, n_out=1)
+
+
+@assert_shape('bld->bld')
+def PseudoRelAttention(q_layer, k_layer, v_layer, l_layer, r_layer,
+                       final_layer, qkv_attention_layer, n_heads=1):
+  """Returns a configured multi-head self-attention layer.
+
+  A :py:class:`ConfigurableAttention` layer acts similarly to
+  :py:class:`Attention` layers, but with configurable components. It
+
+    - makes three copies of incoming activations and uses ``q_layer``,
+      ``k_layer``, and ``v_layer`` to map activations to multi-head query (Q)
+      vectors, key (K) vectors, and value (V) vectors, respectively;
+    - uses ``qkv_attention_layer`` to compute per-head attention, similar to
+      :py:class:`DotProductAttention` or :py:class:`DotProductCausalAttention`;
+    - concatenates and fuses resulting per-head vectors into activations
+      matching original input activation shapes; and
+    - applies a final layer, ``final_layer``, mapping activations to
+      activations (with shape matching the original input activations).
+
+  Args:
+    q_layer: Layer that maps input activations to per-head query activations.
+    k_layer: Layer that maps input activations to per-head key activations.
+    v_layer: Layer that maps input activations to per-head value activations.
+    final_layer: After main multi-head computation and rejoining of heads,
+        layer that maps activations to activations (with shape matching the
+        original input activations).
+    qkv_attention_layer: Layer the does the core multi-head self-attention
+        computation.
+    n_heads: Number of attention heads. Attention heads effectively split
+        activation vectors into ``n_heads`` subvectors, of size
+        ``d_feature / n_heads``.
+  """
+  l_pos = PositionalEmbeddings()
+  r_pos = PositionalEmbeddings()
+
+  unsqueeze = cb.Fn('pos_reshape', lambda x: x[None, ...])
+
+  return cb.Serial(
+      cb.Branch(
+          [q_layer],
+          [l_pos, l_layer, unsqueeze],
+          [k_layer],
+          [r_pos, r_layer, unsqueeze],
+          [v_layer, SplitIntoHeads(n_heads)],
+      ),
+      cb.Parallel(
+          [cb.Add(), SplitIntoHeads(n_heads)],
+          [cb.Add(), SplitIntoHeads(n_heads)],
+      ),
+      qkv_attention_layer,
+      MergeHeads(n_heads),
+      final_layer
+  )
+
+
 @assert_shape('bld->bld')
 def CausalAttention(d_feature, n_heads=1, dropout=0.0,
                     max_inference_length=2048, mode='train'):
@@ -459,8 +543,9 @@ def CausalAttention(d_feature, n_heads=1, dropout=0.0,
         f'Dimensionality of feature embedding ({d_feature}) is not a multiple '
         f'of the requested number of attention heads ({n_heads}).')
 
-  return ConfigurableAttention(
+  return PseudoRelAttention(
       core.Dense(d_feature), core.Dense(d_feature), core.Dense(d_feature),
+      core.Dense(d_feature), core.Dense(d_feature),
       core.Dense(d_feature), n_heads=n_heads,
       qkv_attention_layer=DotProductCausalAttention(
           dropout=dropout, max_inference_length=max_inference_length,
