@@ -970,7 +970,7 @@ class CausalFavorAttention(base.Layer):
                numerical_stabilizer=0.001,
                use_approximate_softmax=True, scale_by_norm=True,
                normalize_data=False,
-               epsilon=0.0001, mode='train'):
+               epsilon=0.0001, unroll=16, mode='train'):
     super().__init__(n_in=3, n_out=1)
     self._d_feature = d_feature
     self._n_heads = n_heads
@@ -980,6 +980,7 @@ class CausalFavorAttention(base.Layer):
     self._use_approximate_softmax = use_approximate_softmax
     self._normalize_data = normalize_data
     self._epsilon = epsilon
+    self._unroll = unroll
     if self._use_approximate_softmax:
       rng = random.get_prng(0)
       self._projection_matrix = self.get_2d_array(
@@ -1086,7 +1087,7 @@ class CausalFavorAttention(base.Layer):
         x_slice = jnp.einsum('...m,...md->...d', q, p)
         return p, x_slice
       p, w = fastmath.scan(body, init_prefix_sum_value,
-                           (query_prime, key_prime, value))
+                           (query_prime, key_prime, value), unroll=self._unroll)
       return w, (p, query_prime, key_prime, value)
 
     def favor_numerator_bwd(pqkv, w_ct):
@@ -1103,7 +1104,8 @@ class CausalFavorAttention(base.Layer):
         return (p, p_ct), (q_ct, k_ct, v_ct)
 
       _, (qs_ct, ks_ct, vs_ct) = fastmath.scan(
-          body, (p, jnp.zeros_like(p)), (qs, ks, vs, w_ct), reverse=True)
+          body, (p, jnp.zeros_like(p)), (qs, ks, vs, w_ct), reverse=True,
+          unroll=self._unroll)
       return (None, qs_ct, ks_ct, vs_ct)
 
     def favor_numerator(init_prefix_sum_value, query_prime,
@@ -1124,7 +1126,8 @@ class CausalFavorAttention(base.Layer):
         return p, x
 
       p, r = fastmath.scan(body, init_prefix_sum_value, (query_prime,
-                                                         key_prime))
+                                                         key_prime),
+                           unroll=self._unroll)
       return r, (query_prime, key_prime, p)
 
     def favor_denominator_bwd(qkp, r_ct):
@@ -1140,7 +1143,9 @@ class CausalFavorAttention(base.Layer):
         return (p, p_ct), (q_ct, k_ct)
 
       _, (qs_ct, ks_ct) = fastmath.scan(
-          body, (p, jnp.zeros_like(p)), (qs, ks, r_ct), reverse=True)
+          body, (p, jnp.zeros_like(p)), (qs, ks, r_ct), reverse=True,
+          unroll=self._unroll
+      )
       return (None, qs_ct, ks_ct)
 
     def favor_denominator(init_prefix_sum_value, query_prime,
