@@ -756,6 +756,8 @@ class RelformerCacher(tl.Layer):
 
   def update_state(self, inputs):
     cache, idx = self.state
+    print(f'Cacher inputs shape: {inputs.shape}')
+    print(f'Cacher state shape: {cache.shape}')
     cache = fastmath.dynamic_update_slice_in_dim(
         cache,
         inputs, (idx + self._shift) % (2 * self._total_kv_pooling),
@@ -980,10 +982,12 @@ def RelformerLM(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
+      tl.PrintShape(),
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,  # vecs
       positional_encoder,
       pre_decoder_blocks,  # vecs
+      tl.PrintShape(),
       tl.Dup(),
       cacher,
       tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
@@ -992,6 +996,7 @@ def RelformerLM(vocab_size,
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       _UpsamplerLM(shorten_factor, d_model),
       tl.LayerNorm(),
+      tl.PrintShape(),
       picker,
       tl.Concatenate(),
       cacher_conv,
