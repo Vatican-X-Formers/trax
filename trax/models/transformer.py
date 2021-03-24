@@ -455,7 +455,8 @@ def _DecoderBlock(d_model,
                   dropout,
                   dropout_shared_axes,
                   mode,
-                  ff_activation):
+                  ff_activation,
+                  attn_type=tl.CausalFavor):
   """Returns a list of layers that implements a Transformer decoder block.
 
   The input to the block is a pair (activations, mask) where the mask encodes
@@ -485,7 +486,7 @@ def _DecoderBlock(d_model,
     A list of layers that act in series as a (repeatable) decoder block.
   """
   def _CausalAttention():
-    return tl.CausalAttention(d_model, n_heads=n_heads, dropout=dropout,
+    return attn_type(d_model, n_heads=n_heads, dropout=dropout,
                               mode=mode),
 
   def _FFBlock():
