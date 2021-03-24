@@ -838,10 +838,11 @@ class CausalFavorAttention(base.Layer):
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
 
-  def __init__(self, numerical_stabilizer=0.001, mode='train'):
+  def __init__(self, numerical_stabilizer=0.001, mode='train', unroll=16):
     super().__init__(n_in=3, n_out=1)
     self._numerical_stabilizer = numerical_stabilizer
     self._mode = mode
+    self._unroll = unroll
 
   def forward(self, inputs):
     def favor_numerator_fwd(init_prefix_sum_value,
@@ -852,7 +853,7 @@ class CausalFavorAttention(base.Layer):
         x_slice = jnp.einsum('...m,...md->...d', q, p)
         return p, x_slice
       p, w = fastmath.scan(body, init_prefix_sum_value,
-                           (query_prime, key_prime, value))
+                           (query_prime, key_prime, value), unroll=self._unroll)
       return w, (p, query_prime, key_prime, value)
 
     def favor_numerator_bwd(pqkv, w_ct):
@@ -869,7 +870,8 @@ class CausalFavorAttention(base.Layer):
         return (p, p_ct), (q_ct, k_ct, v_ct)
 
       _, (qs_ct, ks_ct, vs_ct) = fastmath.scan(
-          body, (p, jnp.zeros_like(p)), (qs, ks, vs, w_ct), reverse=True)
+          body, (p, jnp.zeros_like(p)), (qs, ks, vs, w_ct), reverse=True,
+          unroll=self._unroll)
       return (None, qs_ct, ks_ct, vs_ct)
 
     def favor_numerator(init_prefix_sum_value, query_prime,
@@ -890,7 +892,8 @@ class CausalFavorAttention(base.Layer):
         return p, x
 
       p, r = fastmath.scan(body, init_prefix_sum_value, (query_prime,
-                                                         key_prime))
+                                                         key_prime),
+                           unroll=self._unroll)
       return r, (query_prime, key_prime, p)
 
     def favor_denominator_bwd(qkp, r_ct):
@@ -906,7 +909,9 @@ class CausalFavorAttention(base.Layer):
         return (p, p_ct), (q_ct, k_ct)
 
       _, (qs_ct, ks_ct) = fastmath.scan(
-          body, (p, jnp.zeros_like(p)), (qs, ks, r_ct), reverse=True)
+          body, (p, jnp.zeros_like(p)), (qs, ks, r_ct), reverse=True,
+          unroll=self._unroll
+      )
       return (None, qs_ct, ks_ct)
 
     def favor_denominator(init_prefix_sum_value, query_prime,
