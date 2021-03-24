@@ -489,7 +489,7 @@ def PseudoRelAttention(q_layer, k_layer, v_layer, l_layer, r_layer,
         ``d_feature / n_heads``.
   """
   l_pos = PositionalEmbeddings()
-  r_pos = PositionalEmbeddings()
+  r_pos = l_pos
 
   unsqueeze = cb.Fn('pos_reshape', lambda x: x[None, ...])
 
