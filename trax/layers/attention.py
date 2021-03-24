@@ -425,34 +425,36 @@ def ConfigurableAttention(q_layer, k_layer, v_layer, final_layer,  # pylint: dis
   )
 
 
-def PositionalEmbeddings():
+class PositionalEmbeddings(base.Layer):
   """Positional embedding for relative attention.
 
   Returns a layer that based on queries, keys and accumulated pool size of
   keys/values until this layer calculates sinusoidal positional embeddings
   for relative attention calculations.
 
-  Args:
-    d_model: Depth/dimensionality of feature embedding.
-    separate_cls: True/False if we separate_cls in calculations.
-    total_kv_pooling: Accumulated pool size of keys/values until this layer.
-
   Returns:
     Positional embedding.
   """
+  def __init__(self):
+    super().__init__()
 
-  def PositionsVectors(x):
-    n_queries, d_model = x.shape[1:]
+  def forward(self, inputs):
+    n_queries = inputs.shape[1]
 
     positions = jnp.arange(0, n_queries, 1.0)
 
-    inv_freq = 1 / (10000 ** (jnp.arange(0.0, d_model, 2.0) / d_model))
+    inv_freq = self.weights
     sinusoid_freq = jnp.einsum('i,j->ij', positions, inv_freq)
     pos_emb = jnp.concatenate(
         [jnp.sin(sinusoid_freq), jnp.cos(sinusoid_freq)], axis=1)
     return pos_emb
 
-  return cb.Fn('Generate positions vectors', PositionsVectors, n_out=1)
+  def init_weights_and_state(self, input_signature):
+    d_feature = input_signature.shape[-1]
+
+    inv_freq = 1 / (
+        10000 ** (jnp.arange(0.0, d_feature, 2.0) / d_feature))
+    self.weights = inv_freq
 
 
 @assert_shape('bld->bld')
