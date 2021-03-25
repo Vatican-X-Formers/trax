@@ -280,8 +280,8 @@ class FunnelTransformerTest(parameterized.TestCase):
       np.testing.assert_array_almost_equal(y, y_eval[:, i:i+1, :], decimal=5)
 
   def test_autoregressive_sample_relformerlm(self):
-    batch_size = 4
-    max_length = 5
+    batch_size = 8
+    max_length = 1
     model = ft.RelformerLM(
         10,
         d_model=8,

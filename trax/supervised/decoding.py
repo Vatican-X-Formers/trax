@@ -132,6 +132,7 @@ def autoregressive_sample(model, inputs=None,
     sample = sample[:, None]
     result.append(sample)
     counter += 1
+    print(counter)
     if counter >= max_length:
       return np.concatenate(result, axis=1)
     # Check at which batch positions have we already encountered EOS.
