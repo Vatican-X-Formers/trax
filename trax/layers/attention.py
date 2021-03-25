@@ -456,7 +456,7 @@ def PositionalEmbeddings():
 
 
 @assert_shape('bld->bld')
-def PseudoRelAttention(q_layer, k_layer, v_layer, l_layer, r_layer,
+def PseudoRelAttention(q_layer, k_layer, v_layer, l_layer,
                        final_layer, qkv_attention_layer, n_heads=1):
   """Returns a configured multi-head self-attention layer.
 
@@ -496,7 +496,7 @@ def PseudoRelAttention(q_layer, k_layer, v_layer, l_layer, r_layer,
           [q_layer],
           [l_pos, l_layer, unsqueeze],
           [k_layer],
-          [r_pos, r_layer, unsqueeze],
+          [r_pos, l_layer, unsqueeze],
           [v_layer, SplitIntoHeads(n_heads)],
       ),
       cb.Parallel(
@@ -539,7 +539,7 @@ def CausalAttention(d_feature, n_heads=1, dropout=0.0,
 
   return PseudoRelAttention(
       core.Dense(d_feature), core.Dense(d_feature), core.Dense(d_feature),
-      core.Dense(d_feature), core.Dense(d_feature),
+      core.Dense(d_feature),
       core.Dense(d_feature), n_heads=n_heads,
       qkv_attention_layer=DotProductCausalAttention(
           dropout=dropout, max_inference_length=max_inference_length,
