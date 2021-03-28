@@ -823,8 +823,8 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
       tl.FavorAttention(n_heads, numerical_stabilizer, mode), n_heads=n_heads)
 
 def length_normalized(x, epsilon=1e-6):
-  variance = np.mean(x**2, axis=-1, keepdims=True)
-  norm_inputs = x / np.sqrt(variance + epsilon)
+  variance = jnp.mean(x**2, axis=-1, keepdims=True)
+  norm_inputs = x / jnp.sqrt(variance + epsilon)
   return norm_inputs
 
 class CausalFavorAttention(base.Layer):
