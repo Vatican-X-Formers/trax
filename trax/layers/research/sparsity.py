@@ -833,6 +833,7 @@ class RandomFeatureKernel(base.Layer):
   def __init__(self, d_feature, seq_len):
     super().__init__()
     self._rng = fastmath.random.get_prng(seed=0)
+    self._d_feature = d_feature
     self._w = fastmath.random.normal(self._rng, (seq_len, d_feature))
 
   def forward(self, inputs):
@@ -841,7 +842,7 @@ class RandomFeatureKernel(base.Layer):
         jnp.sin(freqs), jnp.cos(freqs)
     ], axis=-1)
 
-    return features
+    return features / jnp.sqrt(self._d_feature)
 
 
 class CausalFavorAttention(base.Layer):
@@ -864,6 +865,10 @@ class CausalFavorAttention(base.Layer):
     self._numerical_stabilizer = numerical_stabilizer
     self._mode = mode
     self._unroll = unroll
+
+  def init_weights_and_state(self, input_signature):
+    seq_len, d_feature = input_signature[0].shape[1:]
+    self._feature_map = RandomFeatureKernel(d_feature=d_feature, seq_len=seq_len)
 
   def forward(self, inputs):
     def favor_numerator_fwd(init_prefix_sum_value,
@@ -950,11 +955,11 @@ class CausalFavorAttention(base.Layer):
     query = length_normalized(query)
     key = length_normalized(key)
 
-    seq_len, d_feature = query.shape[1:]
-    feature_map = RandomFeatureKernel(d_feature=d_feature, seq_len=seq_len)
+    # seq_len, d_feature = query.shape[1:]
+    # feature_map = RandomFeatureKernel(d_feature=d_feature, seq_len=seq_len)
 
-    query_prime = feature_map(query)
-    key_prime = feature_map(key)
+    query_prime = self._feature_map(query)
+    key_prime = self._feature_map(key)
     prefix_sum_tensor_shape = (key_prime.shape[0], key_prime.shape[-1], value.shape[-1])
     t_slice_shape = (key_prime.shape[0], key_prime.shape[-1])
     init_prefix_sum_value_numerator = jnp.zeros(prefix_sum_tensor_shape)
