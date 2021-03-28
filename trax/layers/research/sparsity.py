@@ -933,8 +933,10 @@ class CausalFavorAttention(base.Layer):
       return 1.0 + elu(x)
 
     query, key, value = inputs
-    query_prime = elu1p(query) + self._numerical_stabilizer
-    key_prime = elu1p(key) + self._numerical_stabilizer
+    d_feature = query.shape[-1]
+
+    query_prime = (relu(query) + self._numerical_stabilizer) / jnp.sqrt(d_feature)
+    key_prime = (relu(key) + self._numerical_stabilizer) / jnp.sqrt(d_feature)
     prefix_sum_tensor_shape = (key.shape[0], key.shape[-1], value.shape[-1])
     t_slice_shape = (key.shape[0], key.shape[-1])
     init_prefix_sum_value_numerator = jnp.zeros(prefix_sum_tensor_shape)
