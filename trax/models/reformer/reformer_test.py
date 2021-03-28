@@ -72,9 +72,14 @@ class ReformerTest(parameterized.TestCase):
 
   def test_reformer_lm_forward_shape(self):
     vocab_size = 16
+    gin.bind_parameter('PureLSHSelfAttention.chunk_len', 2)
+    gin.bind_parameter('PureLSHSelfAttentionWrapper.pure_lsh_implementation',
+                       gin.config.ConfigurableReference(
+                         'trax.layers.PureLSHSelfAttention', False))
     model = reformer.ReformerLM(
         vocab_size, d_model=32, d_ff=64, d_attention_key=16,
-        d_attention_value=16, n_layers=1, n_heads=2, max_len=16)
+        d_attention_value=16, n_layers=1, n_heads=2, max_len=16,
+        attention_type=tl.PureLSHSelfAttentionWrapper)
     xs = [np.ones((1, 8)).astype(np.int32),
           np.ones((1, 8)).astype(np.int32)]
     _, _ = model.init(shapes.signature(xs))
