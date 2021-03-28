@@ -822,10 +822,27 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
       tl.Dense(d_feature),
       tl.FavorAttention(n_heads, numerical_stabilizer, mode), n_heads=n_heads)
 
+
 def length_normalized(x, epsilon=1e-6):
   variance = jnp.mean(x**2, axis=-1, keepdims=True)
   norm_inputs = x / jnp.sqrt(variance + epsilon)
   return norm_inputs
+
+
+class RandomFeatureKernel(base.Layer):
+  def __init__(self, d_feature, seq_len):
+    super().__init__()
+    self._rng = fastmath.random.get_prng(seed=0)
+    self._w = fastmath.random.normal(self._rng, (seq_len, d_feature))
+
+  def forward(self, inputs):
+    freqs = jnp.einsum('bld,ld->bld', inputs, self._w)
+    features = jnp.concatenate([
+        jnp.sin(freqs), jnp.cos(freqs)
+    ], axis=-1)
+
+    return features
+
 
 class CausalFavorAttention(base.Layer):
   """Returns a layer that maps activations to activations, with causal masking.
@@ -929,22 +946,17 @@ class CausalFavorAttention(base.Layer):
 
     favor_denominator.defvjp(favor_denominator_fwd, favor_denominator_bwd)
 
-    def relu(x):
-      return jnp.where(x <= 0, jnp.zeros_like(x), x)
-
-    elu = tl.Elu()
-    def elu1p(x):
-      return 1.0 + elu(x)
-
     query, key, value = inputs
-    d_feature = query.shape[-1]
     query = length_normalized(query)
     key = length_normalized(key)
 
-    query_prime = (elu1p(query) + self._numerical_stabilizer) / jnp.sqrt(d_feature)
-    key_prime = (elu1p(key) + self._numerical_stabilizer) / jnp.sqrt(d_feature)
-    prefix_sum_tensor_shape = (key.shape[0], key.shape[-1], value.shape[-1])
-    t_slice_shape = (key.shape[0], key.shape[-1])
+    seq_len, d_feature = query.shape[1:]
+    feature_map = RandomFeatureKernel(d_feature=d_feature, seq_len=seq_len)
+
+    query_prime = feature_map(query)
+    key_prime = feature_map(key)
+    prefix_sum_tensor_shape = (key_prime.shape[0], key_prime.shape[-1], value.shape[-1])
+    t_slice_shape = (key_prime.shape[0], key_prime.shape[-1])
     init_prefix_sum_value_numerator = jnp.zeros(prefix_sum_tensor_shape)
     init_prefix_sum_value_denominator = jnp.zeros(t_slice_shape)
 
