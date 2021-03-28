@@ -27,7 +27,7 @@ model = FunnelTransformerLM(
 reg_task = training.TrainTask(
     _dataset().train_stream(1),
     #itertools.cycle(_mnist_brightness_dataset().train_stream(1)),
-    loss_layer=tl.CategoryCrossEntropy(),#tl.Serial(tl.Select([1]), tl.L2Loss()),
+    loss_layer=tl.WeightedCategoryCrossEntropy(),#tl.Serial(tl.Select([1]), tl.L2Loss()),
     optimizer=adam.Adam(0.001)
 )
 
