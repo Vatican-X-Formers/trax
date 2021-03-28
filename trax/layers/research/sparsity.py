@@ -834,10 +834,10 @@ class RandomFeatureKernel(base.Layer):
     super().__init__()
     self._rng = fastmath.random.get_prng(seed=0)
     self._d_feature = d_feature
-    self._w = fastmath.random.normal(self._rng, (seq_len, d_feature))
+    self._w = fastmath.random.normal(self._rng, (d_feature, d_feature))
 
   def forward(self, inputs):
-    freqs = jnp.einsum('bld,ld->bld', inputs, self._w)
+    freqs = jnp.einsum('bld,dd->bld', inputs, self._w)
     features = jnp.concatenate([
         jnp.sin(freqs), jnp.cos(freqs)
     ], axis=-1)
