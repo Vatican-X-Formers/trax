@@ -822,6 +822,10 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
       tl.Dense(d_feature),
       tl.FavorAttention(n_heads, numerical_stabilizer, mode), n_heads=n_heads)
 
+def length_normalized(x, epsilon=1e-6):
+  variance = np.mean(x**2, axis=-1, keepdims=True)
+  norm_inputs = x / np.sqrt(variance + epsilon)
+  return norm_inputs
 
 class CausalFavorAttention(base.Layer):
   """Returns a layer that maps activations to activations, with causal masking.
@@ -934,9 +938,11 @@ class CausalFavorAttention(base.Layer):
 
     query, key, value = inputs
     d_feature = query.shape[-1]
+    query = length_normalized(query)
+    key = length_normalized(key)
 
-    query_prime = (relu(query) + self._numerical_stabilizer) / jnp.sqrt(d_feature)
-    key_prime = (relu(key) + self._numerical_stabilizer) / jnp.sqrt(d_feature)
+    query_prime = (elu1p(query) + self._numerical_stabilizer) / jnp.sqrt(d_feature)
+    key_prime = (elu1p(key) + self._numerical_stabilizer) / jnp.sqrt(d_feature)
     prefix_sum_tensor_shape = (key.shape[0], key.shape[-1], value.shape[-1])
     t_slice_shape = (key.shape[0], key.shape[-1])
     init_prefix_sum_value_numerator = jnp.zeros(prefix_sum_tensor_shape)
