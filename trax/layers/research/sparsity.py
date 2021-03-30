@@ -830,19 +830,28 @@ def length_normalized(x, epsilon=1e-6):
 
 
 class RandomFeatureKernel(base.Layer):
-  def __init__(self, d_feature, seq_len):
+  def __init__(self, d_feature):
     super().__init__()
     self._rng = fastmath.random.get_prng(seed=0)
     self._d_feature = d_feature
-    self._w = fastmath.random.normal(self._rng, (d_feature, d_feature))
 
-  def forward(self, inputs):
-    freqs = jnp.einsum('bld,dd->bld', inputs, self._w)
+    self._softmax_temp = 1 / jnp.sqrt(d_feature)
+    self._omega = self._generate_w()
+
+  def _generate_w(self):
+    return fastmath.random.normal(self._rng, (self._d_feature, self._d_feature))
+
+  def regenerate_w(self):
+    self._omega = self._generate_w()
+
+  def forward(self, x):
+    x = x * jnp.sqrt(self._softmax_temp)
+    freqs = jnp.einsum('bld,dd->bld', x, self._omega)
+
     features = jnp.concatenate([
-        jnp.sin(freqs), jnp.cos(freqs)
+        jnp.cos(freqs), jnp.sin(freqs)
     ], axis=-1)
-
-    return features / jnp.sqrt(self._d_feature)
+    return features * jnp.sqrt(1 / self._d_feature)
 
 
 class CausalFavorAttention(base.Layer):
@@ -868,7 +877,7 @@ class CausalFavorAttention(base.Layer):
 
   def init_weights_and_state(self, input_signature):
     seq_len, d_feature = input_signature[0].shape[1:]
-    self._feature_map = RandomFeatureKernel(d_feature=d_feature, seq_len=seq_len)
+    self._feature_map = RandomFeatureKernel(d_feature=d_feature)
 
   def forward(self, inputs):
     def favor_numerator_fwd(init_prefix_sum_value,
@@ -958,6 +967,7 @@ class CausalFavorAttention(base.Layer):
     # seq_len, d_feature = query.shape[1:]
     # feature_map = RandomFeatureKernel(d_feature=d_feature, seq_len=seq_len)
 
+    self._feature_map.regenerate_w()
     query_prime = self._feature_map(query)
     key_prime = self._feature_map(key)
     prefix_sum_tensor_shape = (key_prime.shape[0], key_prime.shape[-1], value.shape[-1])
