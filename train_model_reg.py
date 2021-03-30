@@ -22,6 +22,8 @@ FunnelTransformerLM.vanilla_layers = (1, 1)
 FunnelTransformerLM.vocab_size = 256
 """
 
+n_devices = 8
+
 model = FunnelTransformerLM(
     d_ff = 256,
     d_model = 64,
@@ -47,8 +49,8 @@ def vatican_stream():
                         batch_size_per_device=1,
                         eval_batch_size=1)
 
-train_stream = itertools.cycle(vatican_stream().train_stream(1))
-eval_stream = itertools.cycle(vatican_stream().eval_stream(1))
+train_stream = itertools.cycle(vatican_stream().train_stream(n_devices))
+eval_stream = itertools.cycle(vatican_stream().eval_stream(n_devices))
 
 reg_task = trax.supervised.training.TrainTask(
     labeled_data=train_stream,
@@ -66,3 +68,6 @@ training_session = trax.supervised.training.Loop(
     eval_tasks=[reg_eval_task],
     eval_at=lambda step_n: step_n % 20 == 0,
 )
+
+
+training_session.run(n_steps=100)
