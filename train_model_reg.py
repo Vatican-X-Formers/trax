@@ -52,15 +52,15 @@ eval_stream = itertools.cycle(vatican_stream().eval_stream(1))
 
 reg_task = trax.supervised.training.TrainTask(
     labeled_data=train_stream,
-    loss_layer=trax.layers.CategoryCrossEntropy,
+    loss_layer=trax.layers.CategoryCrossEntropy(),
     optimizer=trax.optimizers.adam.Adam(0.001),
 )
 reg_eval_task = trax.supervised.training.EvalTask(
     labeled_data=eval_stream,
-    metrics=[trax.layers.CategoryCrossEntropy]
+    metrics=[trax.layers.CategoryCrossEntropy()]
 )
 
-training_session = training.Loop(
+training_session = trax.supervised.training.Loop(
     model,
     tasks=[reg_task],
     eval_tasks=[reg_eval_task],
