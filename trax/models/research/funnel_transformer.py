@@ -596,7 +596,8 @@ def FunnelTransformerLM(vocab_size,
                         dropout=0.1,
                         dropout_shared_axes=None,
                         mode='train',
-                        ff_activation=tl.FastGelu):
+                        ff_activation=tl.FastGelu,
+                        n_classes=None):
   """Returns a Transformer language model.
 
   This model performs autoregressive language modeling:
@@ -636,7 +637,8 @@ def FunnelTransformerLM(vocab_size,
     mode: str: 'train' or 'eval'.
     ff_activation: Type of activation function at the end of each encoder
         block; must be an activation-type subclass of `Layer`.
-
+    n_classes: if not none then FunnelTransformerLM is used to predicting
+        image label.
   Returns:
     A Transformer language model as a layer that maps from a tensor of tokens
     to activations over a vocab set.
@@ -701,6 +703,10 @@ def FunnelTransformerLM(vocab_size,
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
                                               total_pooling=1)
 
+  head = tl.Dense(vocab_size) if not n_classes else tl.Serial(
+            tl.Mean(axis=1),
+            tl.Dense(n_classes)
+        )
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
@@ -715,7 +721,7 @@ def FunnelTransformerLM(vocab_size,
       tl.Concatenate(),
       conv_layer,
       post_decoder_blocks,
-      tl.Dense(vocab_size),      # vecs
+      head      # vecs
   )
 
 
