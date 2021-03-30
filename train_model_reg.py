@@ -54,12 +54,12 @@ eval_stream = itertools.cycle(vatican_stream().eval_stream(n_devices))
 
 reg_task = trax.supervised.training.TrainTask(
     labeled_data=train_stream,
-    loss_layer=trax.layers.CategoryCrossEntropy(),
+    loss_layer=trax.layers.WeightedCategoryCrossEntropy(),
     optimizer=trax.optimizers.adam.Adam(0.001),
 )
 reg_eval_task = trax.supervised.training.EvalTask(
     labeled_data=eval_stream,
-    metrics=[trax.layers.CategoryCrossEntropy()]
+    metrics=[trax.layers.WeightedCategoryCrossEntropy()]
 )
 
 training_session = trax.supervised.training.Loop(
