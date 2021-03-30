@@ -5,8 +5,9 @@ from trax.models import FunnelTransformerLM
 
 """
 STEPS
-1. Load and go with im32 reg
-2. Load and go with cf10 reg
+0. go with im32 gen
+1. Load and go with im32 gen
+2. Load and go with cf10 gen
 3. Load, replace weights and go with cf10 cls
 """
 
