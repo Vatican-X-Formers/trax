@@ -43,7 +43,7 @@ def vatican_stream():
         bare_preprocess_fn = trax.data.tf_inputs.downsampled_imagenet_flatten_bare_preprocess
     )
 
-    return inputs.batcher(streams, variable_shapes=False,
+    return trax.data.inputs.batcher(streams, variable_shapes=False,
                         batch_size_per_device=1,
                         eval_batch_size=1)
 
