@@ -961,8 +961,8 @@ class CausalFavorAttention(base.Layer):
     favor_denominator.defvjp(favor_denominator_fwd, favor_denominator_bwd)
 
     query, key, value = inputs
-    query = length_normalized(query)
-    key = length_normalized(key)
+    # query = length_normalized(query)
+    # key = length_normalized(key)
 
     # seq_len, d_feature = query.shape[1:]
     # feature_map = RandomFeatureKernel(d_feature=d_feature, seq_len=seq_len)
