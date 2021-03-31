@@ -142,13 +142,9 @@ def ReformerLM(vocab_size,
   Returns:
     the layer.
   """
-  positional_encoding = ct.PositionalEncoder(
-      mode, dropout, max_len, pos_type, pos_axial_shape, pos_d_axial_embs)
-
   positional_embedder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
-      positional_encoding,
   ]
 
   decoder_blocks = []
