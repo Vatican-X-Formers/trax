@@ -841,7 +841,7 @@ class SinCosFeatureMap(base.Layer):
   def forward(self, x):
     if self._redraw:
       self._redraw_features()
-    x = jnp.einsum('bld,dd->bld', x, self._projection_matrix)
+    x = jnp.matmul(x, self._projection_matrix)
     x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
     scale = 1 / jnp.sqrt(self._d_feature)
     return x * scale
