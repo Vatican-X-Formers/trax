@@ -823,6 +823,30 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
       tl.FavorAttention(n_heads, numerical_stabilizer, mode), n_heads=n_heads)
 
 
+class SinCosFeatureMap(base.Layer):
+  def __init__(self, d_feature, redraw=True):
+    super().__init__()
+    self._d_feature = d_feature
+    self._redraw = redraw
+    self._rng = fastmath.random.get_prng(seed=1)
+    self._projection_matrix = self._draw()
+
+  def _redraw_features(self):
+    self._projection_matrix = self._draw()
+
+  def _draw(self):
+    return fastmath.random.normal(self._rng,
+                                  shape=(self._d_feature, self._d_feature))
+
+  def forward(self, x):
+    if self._redraw:
+      self._redraw_features()
+    x = jnp.einsum('bld,dd->bld', x, self._projection_matrix)
+    x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
+    scale = 1 / jnp.sqrt(self._d_feature)
+    return x * scale
+
+
 class CausalFavorAttention(base.Layer):
   """Returns a layer that maps activations to activations, with causal masking.
 
@@ -842,6 +866,11 @@ class CausalFavorAttention(base.Layer):
     super().__init__(n_in=3, n_out=1)
     self._numerical_stabilizer = numerical_stabilizer
     self._mode = mode
+
+  def init_weights_and_state(self, input_signature):
+    q_shape, k_shape, v_shape = input_signature
+    d_feature = q_shape.shape[-1]
+    self._feature_map = SinCosFeatureMap(d_feature, redraw=True)
 
   def forward(self, inputs):
     def favor_numerator_fwd(init_prefix_sum_value,
@@ -920,19 +949,11 @@ class CausalFavorAttention(base.Layer):
 
     favor_denominator.defvjp(favor_denominator_fwd, favor_denominator_bwd)
 
-    def relu(x):
-      return jnp.where(x <= 0, jnp.zeros_like(x), x)
-
-    elu_fn = tl.Elu()
-
-    def elu(x):
-      return elu_fn(x) + 1
-
     query, key, value = inputs
-    query_prime = elu(query) + self._numerical_stabilizer
-    key_prime = elu(key) + self._numerical_stabilizer
-    prefix_sum_tensor_shape = (key.shape[0], key.shape[-1], value.shape[-1])
-    t_slice_shape = (key.shape[0], key.shape[-1])
+    query_prime = self._feature_map(query) + self._numerical_stabilizer
+    key_prime = self._feature_map(key) + self._numerical_stabilizer
+    prefix_sum_tensor_shape = (key_prime.shape[0], key_prime.shape[-1], value.shape[-1])
+    t_slice_shape = (key_prime.shape[0], key_prime.shape[-1])
     init_prefix_sum_value_numerator = jnp.zeros(prefix_sum_tensor_shape)
     init_prefix_sum_value_denominator = jnp.zeros(t_slice_shape)
 
