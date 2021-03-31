@@ -968,8 +968,9 @@ def CausalFavor(d_feature, n_heads=1, dropout=0.0,
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
   del dropout
-  return tl.ConfigurableAttention(
+  return tl.PseudoRelAttention(
       core.Dense(d_feature), core.Dense(d_feature), core.Dense(d_feature),
+      core.Dense(d_feature), core.Dense(d_feature),
       core.Dense(d_feature), n_heads=n_heads,
       qkv_attention_layer=tl.CausalFavorAttention(numerical_stabilizer,
                                                   mode))

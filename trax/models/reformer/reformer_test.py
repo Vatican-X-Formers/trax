@@ -74,12 +74,13 @@ class ReformerTest(parameterized.TestCase):
     vocab_size = 16
     model = reformer.ReformerLM(
         vocab_size, d_model=32, d_ff=64, d_attention_key=16,
-        d_attention_value=16, n_layers=1, n_heads=2, max_len=16)
-    xs = [np.ones((1, 8)).astype(np.int32),
-          np.ones((1, 8)).astype(np.int32)]
+        d_attention_value=16, n_layers=1, n_heads=2, max_len=16,
+        attention_type=tl.CausalFavor)
+    xs = [np.ones((2, 8)).astype(np.int32),
+          np.ones((2, 8)).astype(np.int32)]
     _, _ = model.init(shapes.signature(xs))
     ys = model(xs)
-    self.assertEqual([y.shape for y in ys], [(1, 8, 16), (1, 8)])
+    self.assertEqual([y.shape for y in ys], [(2, 8, 16), (2, 8)])
 
 
   def test_reformer_lm_lsh(self):
