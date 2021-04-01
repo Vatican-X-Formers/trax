@@ -2,8 +2,6 @@ import trax
 import gin
 import os
 from trax.models import FunnelTransformerLM
-import itertools
-
 
 """
 STEPS
@@ -40,13 +38,11 @@ model = FunnelTransformerLM(
     vocab_size = 256
 )
 
-"""
 _, _ = model.init_from_file(
         '/content/train_dir/model_10.pkl.gz',
         weights_only=True,
         #input_signature=trax.shapes.ShapeDtype((total_batch_size, 1), dtype=np.int32)
 )
-"""
 
 def vatican_stream():
     streams = trax.data.tf_inputs.data_streams(
