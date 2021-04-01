@@ -825,25 +825,26 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
 
 
 class SinCosFeatureMap(base.Layer):
-  def __init__(self, redraw=True, numerical_stabilizer=0.001,
+  def __init__(self, n_heads, redraw=True, numerical_stabilizer=0.001,
                ):
     super().__init__()
     self._redraw = redraw
     self._rng = fastmath.random.get_prng(seed=1)
     self._numerical_stabilizer = numerical_stabilizer
+    self._n_heads = n_heads
 
   def init_weights_and_state(self, input_signature):
     batch_heads, l, d_head = input_signature.shape
 
-    self.weights = jnp.ones((batch_heads // 8, 1, d_head), dtype=jnp.float32)
-    self.state = self._draw(batch_heads, d_head)
+    self.weights = jnp.ones((self._n_heads, 1, d_head), dtype=jnp.float32)
+    self.state = self._draw(d_head)
 
-  def _redraw_features(self, batch_heads, d_head):
-    self.state = self._draw(batch_heads, d_head)
+  def _redraw_features(self, d_head):
+    self.state = self._draw(d_head)
 
-  def _draw(self, batch_heads, d_head):
+  def _draw(self, d_head):
     return fastmath.random.normal(self._rng,
-                                  shape=(batch_heads, d_head, d_head))
+                                  shape=(self._n_heads, d_head, d_head))
 
   def _normalize(self, x):
     x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
@@ -853,7 +854,7 @@ class SinCosFeatureMap(base.Layer):
     batch_heads, l, d_head = x.shape
 
     if self._redraw:
-      self._redraw_features(batch_heads, d_head)
+      self._redraw_features(d_head)
 
     projection_matrix = self.state
     sigma = self.weights
@@ -861,7 +862,9 @@ class SinCosFeatureMap(base.Layer):
     normalized_projection = sigma * projection_matrix
 
     x = self._normalize(x)
-    x = jnp.matmul(x, normalized_projection)
+    batched_projection = jnp.repeat(normalized_projection,
+                                    batch_heads // self._n_heads, axis=0)
+    x = jnp.matmul(x, batched_projection)
 
     # id_print(jnp.linalg.norm(x, axis=-1).mean())
     x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
@@ -873,8 +876,8 @@ class SinCosFeatureMap(base.Layer):
 
 
 @assert_shape('bld,bld,bld->bld')
-def RandomFeatureAttention(mode):
-  feature_map = SinCosFeatureMap()
+def RandomFeatureAttention(mode, n_heads):
+  feature_map = SinCosFeatureMap(n_heads)
   favor = CausalFavorAttention(mode=mode)
 
   return tl.Serial(
@@ -1022,7 +1025,7 @@ def CausalFavor(d_feature, n_heads=1, dropout=0.0,
       core.Dense(d_feature), core.Dense(d_feature), core.Dense(d_feature),
       core.Dense(d_feature), core.Dense(d_feature),
       core.Dense(d_feature), n_heads=n_heads,
-      qkv_attention_layer=tl.RandomFeatureAttention(mode))
+      qkv_attention_layer=tl.RandomFeatureAttention(mode, n_heads))
 
 
 class _RememberInReverse(base.Layer):
