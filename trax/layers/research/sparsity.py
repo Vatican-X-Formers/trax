@@ -839,22 +839,23 @@ class SinCosFeatureMap(base.Layer):
     return fastmath.random.normal(self._rng,
                                   shape=(self._d_feature, self._d_feature))
 
+  def _normalize(self, x):
+    x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
+    return x / x_norm
+
   def forward(self, x):
     if self._redraw:
       self._redraw_features()
 
-    print('Vectors norm before:')
     id_print(jnp.linalg.norm(x, axis=-1).mean())
 
+    x = self._normalize(x)
     x = jnp.matmul(x, self._projection_matrix)
 
-    print('Vectors norm after:')
     id_print(jnp.linalg.norm(x, axis=-1).mean())
     x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
 
-    print('Example dot product:')
     id_print(x[0][0] @ x[0][1])
-
     scale = 1 / jnp.sqrt(self._d_feature)
     return x * scale
 
