@@ -592,8 +592,6 @@ class DotProductCausalAttention(base.Layer):
       inputs: A (queries, keys, values) tuple.
     """
     q, k, v = inputs
-    q = self._normalize(q)
-    k = self._normalize(k)
 
     if self._mode == 'predict':
       self.state, mask = _fast_inference_update_state(inputs, self.state)
