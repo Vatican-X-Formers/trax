@@ -29,6 +29,7 @@ from trax.layers import core
 from trax.layers import initializers as init
 from trax.layers import reversible
 from trax.layers.assert_shape import assert_shape
+from jax.experimental.host_callback import id_print
 
 
 # We use mixed CamelCase and snake_case names in this file.
@@ -841,8 +842,19 @@ class SinCosFeatureMap(base.Layer):
   def forward(self, x):
     if self._redraw:
       self._redraw_features()
+
+    print('Vectors norm before:')
+    id_print(jnp.linalg.norm(x, axis=-1).mean())
+
     x = jnp.matmul(x, self._projection_matrix)
+
+    print('Vectors norm after:')
+    id_print(jnp.linalg.norm(x, axis=-1).mean())
     x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
+
+    print('Example dot product:')
+    id_print(x[0][0] @ x[0][1])
+
     scale = 1 / jnp.sqrt(self._d_feature)
     return x * scale
 
