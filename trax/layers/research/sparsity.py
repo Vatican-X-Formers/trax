@@ -835,7 +835,7 @@ class SinCosFeatureMap(base.Layer):
   def init_weights_and_state(self, input_signature):
     batch_heads, l, d_head = input_signature.shape
 
-    self.weights = jnp.ones((batch_heads, 1, d_head), dtype=jnp.float32)
+    self.weights = jnp.ones((batch_heads // 8, 1, d_head), dtype=jnp.float32)
     self.state = self._draw(batch_heads, d_head)
 
   def _redraw_features(self, batch_heads, d_head):
