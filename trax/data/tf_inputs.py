@@ -631,6 +631,17 @@ def downsampled_imagenet_flatten_bare_preprocess(dataset, training):
 
   return dataset.map(flatten_image)
 
+@gin.configurable(denylist=['dataset', 'training'])
+def downsampled_imagenet_flatten_bare_preprocess_gen(dataset, training):
+  del training
+
+  def flatten_image(features):
+    features['image'] = tf.cast(tf.reshape(features['image'], [-1]), tf.int64)
+    return features
+
+  return dataset.map(flatten_image)
+
+
 
 @gin.configurable(denylist=['dataset', 'training'])
 def concat_preprocess(dataset, training, pad_symbol=0):
