@@ -830,6 +830,7 @@ class SinCosFeatureMap(base.Layer):
     super().__init__()
     self._redraw = redraw
     self._rng = fastmath.random.get_prng(seed=1)
+    self._numerical_stabilizer = numerical_stabilizer
 
   def init_weights_and_state(self, input_signature):
     batch_heads, l, d_head = input_signature.shape
@@ -868,7 +869,7 @@ class SinCosFeatureMap(base.Layer):
     # id_print(x[0][0] @ x[0][1])
     # scale = 1 / jnp.sqrt(self._d_feature)
     scale = 0.1
-    return x * scale
+    return (x * scale) + self._numerical_stabilizer
 
 
 @assert_shape('bld,bld,bld->bld')
