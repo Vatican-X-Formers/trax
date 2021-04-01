@@ -212,8 +212,6 @@ class PureAttention(base.Layer):
           activations have not yet been subdivided into heads.
     """
     q, k, v, mask = inputs
-    q = self._normalize(q)
-    k = self._normalize(k)
 
     d_feature = q.shape[-1]
     n_heads = self._n_heads
@@ -235,6 +233,11 @@ class PureAttention(base.Layer):
     merged_results = MergeHeads(n_heads, merged_batch_and_head=False).forward(
         per_head_results)
     return (merged_results, mask)
+
+
+def _normalize(x):
+  x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
+  return x / x_norm
 
 
 def _per_head_attention(queries, keys, values, mask, dropout, mode, rng):
@@ -273,9 +276,11 @@ def _per_head_attention(queries, keys, values, mask, dropout, mode, rng):
   if dropout >= 1.0:
     raise ValueError(f'Dropout rate ({dropout}) must be lower than 1.')
 
-  d_feature = queries.shape[-1]
+  # d_feature = queries.shape[-1]
+  queries = _normalize(queries)
+  keys = _normalize(keys)
 
-  dots = jnp.matmul(queries, jnp.swapaxes(keys, -1, -2)) / jnp.sqrt(d_feature)
+  dots = jnp.matmul(queries, jnp.swapaxes(keys, -1, -2))
   if mask is not None:
     dots = jnp.where(mask,
                      dots,
@@ -579,10 +584,6 @@ class DotProductCausalAttention(base.Layer):
     self._dropout = dropout
     self._mode = mode
     self._max_len = max_inference_length
-
-  def _normalize(self, x):
-    x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
-    return x / x_norm
 
   def forward(self, inputs):
     """Returns attention-computed activations.
