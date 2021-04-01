@@ -818,7 +818,7 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
   """
   del dropout  # not implemented yet but needed in the API
 
-  return  tl.ConfigurableAttention(
+  return tl.ConfigurableAttention(
       tl.Dense(d_feature), tl.Dense(d_feature), tl.Dense(d_feature),
       tl.Dense(d_feature),
       tl.FavorAttention(n_heads, numerical_stabilizer, mode), n_heads=n_heads)
@@ -827,14 +827,14 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
 class SinCosFeatureMap(base.Layer):
   def __init__(self, n_heads, redraw=True, numerical_stabilizer=0.001,
                ):
-    super().__init__()
+    super().__init__(n_in=2, n_out=2)
     self._redraw = redraw
     self._rng = fastmath.random.get_prng(seed=1)
     self._numerical_stabilizer = numerical_stabilizer
     self._n_heads = n_heads
 
   def init_weights_and_state(self, input_signature):
-    batch_heads, l, d_head = input_signature.shape
+    batch_heads, l, d_head = input_signature[0].shape
 
     self.weights = jnp.ones((self._n_heads, 1, d_head), dtype=jnp.float32)
     self.state = self._draw(d_head)
@@ -848,13 +848,10 @@ class SinCosFeatureMap(base.Layer):
 
   def _normalize(self, x):
     x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
-    return x / x_norm
+    return x / (x_norm + self._numerical_stabilizer)
 
-  def forward(self, x):
+  def _project(self, x):
     batch_heads, l, d_head = x.shape
-
-    if self._redraw:
-      self._redraw_features(d_head)
 
     projection_matrix = self.state
     sigma = self.weights
@@ -874,14 +871,22 @@ class SinCosFeatureMap(base.Layer):
     scale = 0.1
     return (x * scale) + self._numerical_stabilizer
 
+  def forward(self, inputs):
+    q, k = inputs
+
+    if self._redraw:
+      self._redraw_features(d_head=q.shape[-1])
+
+    return self._project(q), self._project(k)
+
 
 @assert_shape('bld,bld,bld->bld')
 def RandomFeatureAttention(mode, n_heads):
-  feature_map = SinCosFeatureMap(n_heads)
+  qk_feature_map = SinCosFeatureMap(n_heads)
   favor = CausalFavorAttention(mode=mode)
 
   return tl.Serial(
-      tl.Parallel(feature_map, feature_map),
+      qk_feature_map,
       favor
   )
 
