@@ -204,10 +204,6 @@ class PureAttention(base.Layer):
     self._dropout = dropout
     self._mode = mode
 
-  def _normalize(self, x):
-    x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
-    return x / x_norm
-
   def forward(self, inputs):
     """Returns attention-computed activations and unmodified mask.
 
@@ -584,6 +580,10 @@ class DotProductCausalAttention(base.Layer):
     self._mode = mode
     self._max_len = max_inference_length
 
+  def _normalize(self, x):
+    x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
+    return x / x_norm
+
   def forward(self, inputs):
     """Returns attention-computed activations.
 
@@ -591,6 +591,8 @@ class DotProductCausalAttention(base.Layer):
       inputs: A (queries, keys, values) tuple.
     """
     q, k, v = inputs
+    q = self._normalize(q)
+    k = self._normalize(k)
 
     if self._mode == 'predict':
       self.state, mask = _fast_inference_update_state(inputs, self.state)
