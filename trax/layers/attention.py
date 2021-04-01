@@ -204,6 +204,10 @@ class PureAttention(base.Layer):
     self._dropout = dropout
     self._mode = mode
 
+  def _normalize(self, x):
+    x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
+    return x / x_norm
+
   def forward(self, inputs):
     """Returns attention-computed activations and unmodified mask.
 
@@ -212,6 +216,8 @@ class PureAttention(base.Layer):
           activations have not yet been subdivided into heads.
     """
     q, k, v, mask = inputs
+    q = self._normalize(q)
+    k = self._normalize(k)
 
     d_feature = q.shape[-1]
     n_heads = self._n_heads
