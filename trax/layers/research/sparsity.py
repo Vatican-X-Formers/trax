@@ -847,15 +847,15 @@ class SinCosFeatureMap(base.Layer):
     if self._redraw:
       self._redraw_features()
 
-    id_print(jnp.linalg.norm(x, axis=-1).mean())
+    # id_print(jnp.linalg.norm(x, axis=-1).mean())
 
     x = self._normalize(x)
     x = jnp.matmul(x, self._projection_matrix)
 
-    id_print(jnp.linalg.norm(x, axis=-1).mean())
+    # id_print(jnp.linalg.norm(x, axis=-1).mean())
     x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
 
-    id_print(x[0][0] @ x[0][1])
+    # id_print(x[0][0] @ x[0][1])
     scale = 1 / jnp.sqrt(self._d_feature)
     return x * scale
 
