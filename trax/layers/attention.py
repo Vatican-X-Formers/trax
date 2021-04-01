@@ -280,7 +280,8 @@ def _per_head_attention(queries, keys, values, mask, dropout, mode, rng):
   queries = _normalize(queries)
   keys = _normalize(keys)
 
-  dots = jnp.matmul(queries, jnp.swapaxes(keys, -1, -2))
+  g = 20
+  dots = g * jnp.matmul(queries, jnp.swapaxes(keys, -1, -2))
   if mask is not None:
     dots = jnp.where(mask,
                      dots,
