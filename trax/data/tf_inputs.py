@@ -597,6 +597,26 @@ def cifar10_augmentation_flatten_preprocess(dataset,
 
   return dataset
 
+def cifar10_gen(dataset, training):
+  del training
+  #print('debug', next(dataset))
+  def cast_image(features, targets):
+    img = features['image']
+    new_features = {'image': tf.cast(img, tf.float32) / 255.0}
+    return new_features, targets
+
+  def flat_image(features, targets):
+    img = features['image']
+    flat = tf.cast(tf.reshape(img, [-1]), tf.int64)
+    features['image'] = flat
+    return features, targets
+
+  #print('debug', next(dataset))
+  dataset = dataset.map(cast_image)
+  dataset = dataset.map(flat_image)
+
+  return dataset
+
 
 @gin.configurable(denylist=['dataset', 'training'])
 def downsampled_imagenet_flatten_bare_preprocess(dataset, training):
