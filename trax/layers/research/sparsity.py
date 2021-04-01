@@ -825,39 +825,61 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
 
 
 class SinCosFeatureMap(base.Layer):
-  def __init__(self, d_feature, redraw=True):
+  def __init__(self, redraw=True, numerical_stabilizer=0.001,
+               ):
     super().__init__()
-    self._d_feature = d_feature
     self._redraw = redraw
     self._rng = fastmath.random.get_prng(seed=1)
-    self._projection_matrix = self._draw()
 
-  def _redraw_features(self):
-    self._projection_matrix = self._draw()
+  def init_weights_and_state(self, input_signature):
+    batch_heads, l, d_head = input_signature.shape
 
-  def _draw(self):
+    self.weights = jnp.ones((batch_heads, 1, d_head), dtype=jnp.float32)
+    self.state = self._draw(batch_heads, d_head)
+
+  def _redraw_features(self, batch_heads, d_head):
+    self.state = self._draw(batch_heads, d_head)
+
+  def _draw(self, batch_heads, d_head):
     return fastmath.random.normal(self._rng,
-                                  shape=(self._d_feature, self._d_feature))
+                                  shape=(batch_heads, d_head, d_head))
 
   def _normalize(self, x):
     x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
     return x / x_norm
 
   def forward(self, x):
-    if self._redraw:
-      self._redraw_features()
+    batch_heads, l, d_head = x.shape
 
-    # id_print(jnp.linalg.norm(x, axis=-1).mean())
+    projection_matrix = self.state
+    sigma = self.weights
+
+    normalized_projection = sigma * projection_matrix
+
+    if self._redraw:
+      self._redraw_features(batch_heads, d_head)
 
     x = self._normalize(x)
-    x = jnp.matmul(x, self._projection_matrix)
+    x = jnp.matmul(x, normalized_projection)
 
     # id_print(jnp.linalg.norm(x, axis=-1).mean())
     x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
 
     # id_print(x[0][0] @ x[0][1])
-    scale = 1 / jnp.sqrt(self._d_feature)
+    # scale = 1 / jnp.sqrt(self._d_feature)
+    scale = 0.1
     return x * scale
+
+
+@assert_shape('bld,bld,bld->bld')
+def RandomFeatureAttention(mode):
+  feature_map = SinCosFeatureMap()
+  favor = CausalFavorAttention(mode=mode)
+
+  return tl.Serial(
+      tl.Parallel(feature_map, feature_map),
+      favor
+  )
 
 
 class CausalFavorAttention(base.Layer):
@@ -875,15 +897,9 @@ class CausalFavorAttention(base.Layer):
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
 
-  def __init__(self, numerical_stabilizer=0.001, mode='train'):
+  def __init__(self, mode='train'):
     super().__init__(n_in=3, n_out=1)
-    self._numerical_stabilizer = numerical_stabilizer
     self._mode = mode
-
-  def init_weights_and_state(self, input_signature):
-    q_shape, k_shape, v_shape = input_signature
-    d_feature = q_shape.shape[-1]
-    self._feature_map = SinCosFeatureMap(d_feature, redraw=True)
 
   def forward(self, inputs):
     def favor_numerator_fwd(init_prefix_sum_value,
@@ -962,9 +978,8 @@ class CausalFavorAttention(base.Layer):
 
     favor_denominator.defvjp(favor_denominator_fwd, favor_denominator_bwd)
 
-    query, key, value = inputs
-    query_prime = self._feature_map(query) + self._numerical_stabilizer
-    key_prime = self._feature_map(key) + self._numerical_stabilizer
+    query_prime, key_prime, value = inputs
+
     prefix_sum_tensor_shape = (key_prime.shape[0], key_prime.shape[-1], value.shape[-1])
     t_slice_shape = (key_prime.shape[0], key_prime.shape[-1])
     init_prefix_sum_value_numerator = jnp.zeros(prefix_sum_tensor_shape)
@@ -1006,8 +1021,7 @@ def CausalFavor(d_feature, n_heads=1, dropout=0.0,
       core.Dense(d_feature), core.Dense(d_feature), core.Dense(d_feature),
       core.Dense(d_feature), core.Dense(d_feature),
       core.Dense(d_feature), n_heads=n_heads,
-      qkv_attention_layer=tl.CausalFavorAttention(numerical_stabilizer,
-                                                  mode))
+      qkv_attention_layer=tl.RandomFeatureAttention(mode))
 
 
 class _RememberInReverse(base.Layer):
