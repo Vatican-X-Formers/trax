@@ -852,13 +852,13 @@ class SinCosFeatureMap(base.Layer):
   def forward(self, x):
     batch_heads, l, d_head = x.shape
 
+    if self._redraw:
+      self._redraw_features(batch_heads, d_head)
+
     projection_matrix = self.state
     sigma = self.weights
 
     normalized_projection = sigma * projection_matrix
-
-    if self._redraw:
-      self._redraw_features(batch_heads, d_head)
 
     x = self._normalize(x)
     x = jnp.matmul(x, normalized_projection)
