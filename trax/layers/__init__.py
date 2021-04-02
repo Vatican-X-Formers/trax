@@ -78,8 +78,7 @@ SinCosFeatureMap = layer_configure(SinCosFeatureMap, denylist=['mode'])
 DotProductCausalAttention = layer_configure(
     DotProductCausalAttention, denylist=['mode'])
 SelfAttention = layer_configure(SelfAttention, denylist=['mode'])
-ModularCausalAttention = layer_configure(ModularCausalAttention,
-                                         denylist=['mode'])
+ModularCausalAttention = layer_configure(ModularCausalAttention)
 LowRankCausalAttention = layer_configure(LowRankCausalAttention,
                                          denylist=['mode'])
 MultiplicativeCausalAttention = layer_configure(MultiplicativeCausalAttention,
