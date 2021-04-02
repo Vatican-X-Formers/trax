@@ -25,8 +25,9 @@ from tensorflow import test
 from trax import fastmath
 from trax import shapes
 import trax.layers as tl
-from trax.layers import test_utils
+from trax.layers import test_utils, SinCosFeatureMap
 from trax.layers.research import sparsity
+from absl import logging
 
 
 class EfficientFeedForwardTest(test.TestCase, parameterized.TestCase):
@@ -410,6 +411,42 @@ class FavorTest(test.TestCase):
     fwd = lambda weights, inp: layer.pure_fn(inp, weights, state, rng=rng)[0]
     g = fastmath.grad(fwd)(layer.weights, (x, x, w))
     self.assertEqual(g[0][0].shape, (4, 4))
+
+  def test_sincos_feature_map(self):
+    np.set_printoptions(precision=3)
+    d_head = 64
+    n = 20
+    # q1 = np.arange(d_feature)
+    # q2 = q1 * 2
+    #
+    # q = np.stack([q1, q2])[None, :]
+    tau = 1
+
+    q_orig = np.random.normal(size=(1, n, d_head))
+    k_orig = np.random.normal(size=(1, n, d_head))
+    q = q_orig / np.linalg.norm(q_orig, keepdims=True, axis=-1)
+    k = k_orig / np.linalg.norm(k_orig, keepdims=True, axis=-1)
+
+    print(q.shape)
+    print('Norm pre:', np.linalg.norm(q, axis=-1))
+    map = SinCosFeatureMap(1, init_sigma=1, redraw=True)
+    map.init_weights_and_state(input_signature=shapes.signature((q, k)))
+    groundtruth = np.exp(np.matmul(q, k.swapaxes(-1, -2)) / tau)[0]
+    real = np.exp(np.matmul(q_orig, k_orig.swapaxes(-1, -2)))[0]
+    print(groundtruth, real)
+    for i in range(10):
+      print(f'Try {i}:')
+      qq, kk = map((q, k))
+      # print('Norm post:', np.linalg.norm(qq, axis=-1))
+      pre_logits = np.exp(1 / tau) * np.matmul(qq, kk.swapaxes(-1, -2))[0]
+      print(pre_logits)
+      print(np.linalg.norm(groundtruth - pre_logits, ord='fro'))
+
+  def test_rng(self):
+    rng = fastmath.random.get_prng(seed=0)
+    for i in range(10):
+      rng, rng_input = fastmath.random.split(rng)
+      print(fastmath.random.randint(rng_input, (), 0, 10))
 
 
 if __name__ == '__main__':

@@ -826,25 +826,29 @@ def Favor(d_feature, n_heads=1, dropout=0.0,
 
 class SinCosFeatureMap(base.Layer):
   def __init__(self, n_heads, redraw=True, numerical_stabilizer=0.001,
+               init_sigma=1.
                ):
     super().__init__(n_in=2, n_out=2)
     self._redraw = redraw
-    self._rng = fastmath.random.get_prng(seed=1)
     self._numerical_stabilizer = numerical_stabilizer
     self._n_heads = n_heads
+    self._init_sigma = init_sigma
 
   def init_weights_and_state(self, input_signature):
     batch_heads, l, d_head = input_signature[0].shape
 
-    self.weights = jnp.ones((self._n_heads, 1, d_head), dtype=jnp.float32)
-    self.state = self._draw(d_head)
+    self.weights = jnp.full((self._n_heads, 1, d_head),
+                            fill_value=self._init_sigma,
+                            dtype=jnp.float32)
+    rng = fastmath.random.get_prng(seed=1)
+    new_rng, proj = self._draw(rng, d_head)
+    self.state = (new_rng, proj)
 
-  def _redraw_features(self, d_head):
-    self.state = self._draw(d_head)
-
-  def _draw(self, d_head):
-    return fastmath.random.normal(self._rng,
-                                  shape=(self._n_heads, d_head, d_head))
+  def _draw(self, rng, d_head):
+    new_rng, rng_input = fastmath.random.split(rng)
+    res = fastmath.random.normal(rng_input,
+                                 shape=(self._n_heads, d_head, d_head))
+    return new_rng, res
 
   def _normalize(self, x):
     x_norm = jnp.linalg.norm(x, ord=2, axis=-1, keepdims=True)
@@ -853,7 +857,7 @@ class SinCosFeatureMap(base.Layer):
   def _project(self, x):
     batch_heads, l, d_head = x.shape
 
-    projection_matrix = self.state
+    projection_matrix = self.state[1]
     sigma = self.weights
 
     normalized_projection = sigma * projection_matrix
@@ -867,15 +871,15 @@ class SinCosFeatureMap(base.Layer):
     x = jnp.concatenate([jnp.sin(x), jnp.cos(x)], axis=-1)
 
     # id_print(x[0][0] @ x[0][1])
-    # scale = 1 / jnp.sqrt(self._d_feature)
-    scale = 0.1
+    scale = jnp.sqrt(1 / d_head)
     return (x * scale) + self._numerical_stabilizer
 
   def forward(self, inputs):
     q, k = inputs
 
     if self._redraw:
-      self._redraw_features(d_head=q.shape[-1])
+      rng = self.state[0]
+      self.state = self._draw(rng, d_head=q.shape[-1])
 
     return self._project(q), self._project(k)
 

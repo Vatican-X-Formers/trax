@@ -74,6 +74,7 @@ FavorAttention = layer_configure(FavorAttention, denylist=['mode'])
 Favor = layer_configure(Favor, denylist=['mode'])
 CausalFavor = layer_configure(CausalFavor, denylist=['mode'])
 CausalFavorAttention = layer_configure(CausalFavorAttention, denylist=['mode'])
+SinCosFeatureMap = layer_configure(SinCosFeatureMap, denylist=['mode'])
 DotProductCausalAttention = layer_configure(
     DotProductCausalAttention, denylist=['mode'])
 SelfAttention = layer_configure(SelfAttention, denylist=['mode'])
