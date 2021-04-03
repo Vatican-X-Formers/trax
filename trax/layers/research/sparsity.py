@@ -968,8 +968,8 @@ class CausalFavorAttention(base.Layer):
   """
 
   def __init__(self, d_feature=4, n_heads=1, n_random_features=256,
-               numerical_stabilizer=0.001,
-               use_approximate_softmax=True, scale_by_norm=True,
+               numerical_stabilizer=1e-6,
+               scale_by_norm=True,
                normalize_data=False,
                epsilon=0.0001, unroll=16, mode='train'):
     super().__init__(n_in=3, n_out=1)
@@ -978,17 +978,15 @@ class CausalFavorAttention(base.Layer):
     self._n_random_features = n_random_features
     self._numerical_stabilizer = numerical_stabilizer
     self._mode = mode
-    self._use_approximate_softmax = use_approximate_softmax
     self._normalize_data = normalize_data
     self._epsilon = epsilon
     self._unroll = unroll
-    if self._use_approximate_softmax:
-      rng = random.get_prng(0)
-      self._projection_matrix = self.get_2d_array(
-          rng=rng, n_rows=self._n_random_features,
-          n_columns=(self._d_feature // self._n_heads),
-          scale_by_norm=scale_by_norm,
-          normalize_data=normalize_data, epsilon=epsilon)
+    rng = random.get_prng(0)
+    self._projection_matrix = self.get_2d_array(
+        rng=rng, n_rows=self._n_random_features,
+        n_columns=(self._d_feature // self._n_heads),
+        scale_by_norm=scale_by_norm,
+        normalize_data=normalize_data, epsilon=epsilon)
 
   @staticmethod
   def get_2d_array(rng, n_rows=256, n_columns=0, scale_by_norm=True,
@@ -1215,6 +1213,8 @@ class CausalFavorAttention(base.Layer):
                           jnp.moveaxis(key_prime, 1, 0))
     w = jnp.moveaxis(w, 0, 1)
     r = jnp.moveaxis(r, 0, 1)
+    r = r + 2 * self._numerical_stabilizer * (
+        jnp.abs(r) <= self._numerical_stabilizer)
     r = jnp.reciprocal(r)
     r = jnp.expand_dims(r, len(r.shape))
     renormalized_attention = w * r
