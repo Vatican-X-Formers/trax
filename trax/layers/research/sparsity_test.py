@@ -462,6 +462,40 @@ class FavorTest(test.TestCase):
     g = fastmath.grad(fwd)(layer.weights, (x, x, w))
     self.assertEqual(g[0][0].shape, (4, 4))
 
+  def test_random_features(self):
+    fastmath.disable_jit()
+    np.set_printoptions(precision=4, suppress=True)
+    d = 64
+    n_rows = 128
+    b, l = 1, 64
+
+    q = np.random.normal(size=(b, l, d))
+    k = np.random.normal(size=(b, l, d))
+
+    groundtruth = np.exp(np.matmul(q, k.swapaxes(-1, -2)) / np.sqrt(d))
+    print(groundtruth)
+
+    favor = tl.CausalFavorAttention(d_feature=d, n_heads=1, scale_by_norm=False,
+                                    normalize_data=True,
+                                    n_random_features=n_rows)
+    qq = favor.nonnegative_softmax_kernel_feature_creator(q, is_query=True)
+    kk = favor.nonnegative_softmax_kernel_feature_creator(k, is_query=False)
+
+    approx = np.matmul(qq, kk.swapaxes(-1, -2))
+    print(approx)
+    print((groundtruth - approx) ** 2)
+    print('mse: ', ((groundtruth - approx) ** 2).mean())
+
+    def attn_scores(exps):
+      x = exps.sum(axis=-1, keepdims=True)
+      return exps / x
+
+    real_scores = attn_scores(groundtruth)
+    approx_scores = attn_scores(approx)
+    print(real_scores, approx_scores)
+    print('attn rmse: ', np.sqrt(((real_scores - approx_scores) ** 2).mean()))
+
+
 
 if __name__ == '__main__':
   test.main()

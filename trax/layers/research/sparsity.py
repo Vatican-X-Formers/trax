@@ -1057,23 +1057,22 @@ class CausalFavorAttention(base.Layer):
     data_dash = jnp.einsum('Bij, Bkj -> Bik',
                            data_normalizer * x,
                            data_thick_random_matrix)
+    # diag_data = ||x||**2 / 2
     diag_data = jnp.square(x)
     diag_data = jnp.sum(diag_data, axis=x.ndim - 1)
-    diag_data = (diag_data / 2.0) * data_normalizer * data_normalizer
+    diag_data = (diag_data / 2.0) * data_normalizer * data_normalizer # why data_normalizer???
     diag_data = jnp.expand_dims(diag_data, axis=x.ndim - 1)
 
     last_dims_t = (len(data_dash.shape) - 1,)
     attention_dims_t = (1,)
     if is_query:
-      data_dash = ratio * (
-          jnp.exp(data_dash - diag_data -
-                  jnp.max(data_dash, axis=last_dims_t, keepdims=True)) +
-          self._epsilon)
+      # mx = jnp.max(data_dash, axis=last_dims_t, keepdims=True)
+      mx = 0
+      data_dash = ratio * (jnp.exp(data_dash - diag_data - mx) + self._epsilon)
     else:
-      data_dash = ratio * (
-          jnp.exp(data_dash - diag_data - jnp.max(
-              data_dash, axis=last_dims_t + attention_dims_t, keepdims=True)) +
-          self._epsilon)
+      # mx = jnp.max(data_dash, axis=last_dims_t + attention_dims_t, keepdims=True)
+      mx = 0
+      data_dash = ratio * (jnp.exp(data_dash - diag_data - mx) + self._epsilon)
 
     return data_dash
 
