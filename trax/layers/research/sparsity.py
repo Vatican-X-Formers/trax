@@ -1011,14 +1011,14 @@ class CausalFavorAttention(base.Layer):
     for _ in range(n_full_blocks):
       rng, rng_input = random.split(rng)
       unstructured_block = random.normal(rng_input, (n_columns, n_columns))
-      q, _ = jnp.linalg.qr(unstructured_block)
+      q, _ = np.linalg.qr(unstructured_block)
       q = jnp.transpose(q)
       block_list.append(q)
     remaining_rows = n_rows - n_full_blocks * n_columns
     if remaining_rows > 0:
       rng, rng_input = random.split(rng)
       unstructured_block = random.normal(rng_input, (n_columns, n_columns))
-      q, _ = jnp.linalg.qr(unstructured_block)
+      q, _ = np.linalg.qr(unstructured_block)
       q = jnp.transpose(q)
       block_list.append(q[0:remaining_rows])
     final_matrix = jnp.vstack(block_list)
@@ -1030,7 +1030,6 @@ class CausalFavorAttention(base.Layer):
       multiplier = jnp.sqrt(float(n_columns)) * jnp.ones((n_rows))
 
     return jnp.matmul(jnp.diag(multiplier), final_matrix)
-
 
   def nonnegative_softmax_kernel_feature_creator(self, x, is_query):
     """Constructs nonnegative kernel features for fast softmax attention.
