@@ -21,6 +21,7 @@ import math
 import random as pyrandom
 import numpy as np
 
+import jax
 from trax import fastmath
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
@@ -1031,6 +1032,44 @@ class CausalFavorAttention(base.Layer):
 
     return jnp.matmul(jnp.diag(multiplier), final_matrix)
 
+  def generalized_kernel_feature_creator(self, data,
+                                         precision=None, kernel_fn=jax.nn.relu,
+                                         kernel_epsilon=0.001):
+    """Constructs kernel features for fast generalized attention.
+    Args:
+      data: input for which features are computes
+      projection_matrix: matrix used to compute features
+      batch_dims_t: tuple of batch dimensions
+      precision: precision parameter
+      kernel_fn: kernel function used
+      kernel_epsilon: additive positive term added to every feature for numerical
+        stability
+      normalize_data: predicate indicating whether data should be normalized.
+    Returns:
+      Random features for fast generalized attention.
+    """
+    if self._normalize_data:
+      data_normalizer = 1.0 / (jnp.sqrt(jnp.sqrt(data.shape[-1])))
+    else:
+      data_normalizer = 1.0
+    if self._projection_matrix is None:
+      return kernel_fn(data_normalizer * data) + kernel_epsilon
+    else:
+      batch_dims_t = (0,)
+
+      data_mod_shape = data.shape[
+                       0:len(batch_dims_t)] + self._projection_matrix.shape
+      data_thick_random_matrix = jnp.zeros(
+        data_mod_shape) + self._projection_matrix
+      data_dash = jax.lax.dot_general(
+          data_normalizer * data,
+          data_thick_random_matrix,
+          (((data.ndim - 1,), (data_thick_random_matrix.ndim - 1,)),
+           (batch_dims_t, batch_dims_t)),
+          precision=precision)
+    data_prime = kernel_fn(data_dash) + kernel_epsilon
+    return data_prime
+
   def nonnegative_softmax_kernel_feature_creator(self, x, is_query):
     """Constructs nonnegative kernel features for fast softmax attention.
 
@@ -1159,9 +1198,10 @@ class CausalFavorAttention(base.Layer):
     favor_denominator.defvjp(favor_denominator_fwd, favor_denominator_bwd)
 
     query, key, value = inputs
-    query_prime = self.nonnegative_softmax_kernel_feature_creator(query, True)
-    key_prime = self.nonnegative_softmax_kernel_feature_creator(key, False)
-    prefix_sum_tensor_shape = (key_prime.shape[0], key_prime.shape[-1], value.shape[-1])
+    query_prime = self.generalized_kernel_feature_creator(query)
+    key_prime = self.generalized_kernel_feature_creator(key)
+    prefix_sum_tensor_shape = (
+      key_prime.shape[0], key_prime.shape[-1], value.shape[-1])
     t_slice_shape = (key_prime.shape[0], key_prime.shape[-1])
     init_prefix_sum_value_numerator = jnp.zeros(prefix_sum_tensor_shape)
     init_prefix_sum_value_denominator = jnp.zeros(t_slice_shape)
