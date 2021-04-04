@@ -970,27 +970,33 @@ class CausalFavorAttention(base.Layer):
   def __init__(self, d_feature=4, n_heads=1, n_random_features=256,
                numerical_stabilizer=1e-6,
                scale_by_norm=True,
-               normalize_data=False,
-               epsilon=0.0001, unroll=16, mode='train'):
+               normalize_data=True,
+               redraw_features=True,
+               epsilon=0.0001,
+               unroll=16, mode='train'):
     super().__init__(n_in=3, n_out=1)
     self._d_feature = d_feature
     self._n_heads = n_heads
     self._n_random_features = n_random_features
     self._numerical_stabilizer = numerical_stabilizer
     self._mode = mode
+    self._scale_by_norm = scale_by_norm
     self._normalize_data = normalize_data
+    self._redraw_features = redraw_features
     self._epsilon = epsilon
     self._unroll = unroll
     rng = random.get_prng(0)
-    self._projection_matrix = self.get_2d_array(
-        rng=rng, n_rows=self._n_random_features,
+    self.draw_weights(rng)
+
+  def draw_weights(self, rng):
+    matrixrng, _ = random.split(rng)
+    self.state = self.get_2d_array(
+        rng=matrixrng, n_rows=self._n_random_features,
         n_columns=(self._d_feature // self._n_heads),
-        scale_by_norm=scale_by_norm,
-        normalize_data=normalize_data, epsilon=epsilon)
+        scale_by_norm=self._scale_by_norm)
 
   @staticmethod
-  def get_2d_array(rng, n_rows=256, n_columns=0, scale_by_norm=True,
-                   normalize_data=False, epsilon=0.0001):
+  def get_2d_array(rng, n_rows=256, n_columns=0, scale_by_norm=True):
     """Generator for approximate softmax orthogonal kernel feature matrix.
 
     Args:
@@ -998,9 +1004,6 @@ class CausalFavorAttention(base.Layer):
       n_rows: Number of rows.
       n_columns: Number of columns.
       scale_by_norm: Boolean; whether to scale orthogonal random matrix.
-      normalize_data: predicate indicating whether data should be normalized.
-      epsilon: numerical stabilizer.
-
     Returns:
       Orthogonal kernel feature matrix.
     """
@@ -1010,14 +1013,14 @@ class CausalFavorAttention(base.Layer):
     for _ in range(n_full_blocks):
       rng, rng_input = random.split(rng)
       unstructured_block = random.normal(rng_input, (n_columns, n_columns))
-      q, _ = np.linalg.qr(unstructured_block)
+      q, _ = jnp.linalg.qr(unstructured_block)
       q = jnp.transpose(q)
       block_list.append(q)
     remaining_rows = n_rows - n_full_blocks * n_columns
     if remaining_rows > 0:
       rng, rng_input = random.split(rng)
       unstructured_block = random.normal(rng_input, (n_columns, n_columns))
-      q, _ = np.linalg.qr(unstructured_block)
+      q, _ = jnp.linalg.qr(unstructured_block)
       q = jnp.transpose(q)
       block_list.append(q[0:remaining_rows])
     final_matrix = jnp.vstack(block_list)
@@ -1046,19 +1049,21 @@ class CausalFavorAttention(base.Layer):
     Returns:
       Random features for fast generalized attention.
     """
+    projection_matrix = self.state
+
     if self._normalize_data:
       data_normalizer = 1.0 / (jnp.sqrt(jnp.sqrt(data.shape[-1])))
     else:
       data_normalizer = 1.0
-    if self._projection_matrix is None:
+    if projection_matrix is None:
       return kernel_fn(data_normalizer * data) + kernel_epsilon
     else:
       batch_dims_t = (0,)
 
       data_mod_shape = data.shape[
-                       0:len(batch_dims_t)] + self._projection_matrix.shape
+                       0:len(batch_dims_t)] + projection_matrix.shape
       data_thick_random_matrix = jnp.zeros(
-        data_mod_shape) + self._projection_matrix
+        data_mod_shape) + projection_matrix
       data_dash = jax.lax.dot_general(
           data_normalizer * data,
           data_thick_random_matrix,
@@ -1067,52 +1072,6 @@ class CausalFavorAttention(base.Layer):
           precision=precision)
     data_prime = kernel_fn(data_dash) + kernel_epsilon
     return data_prime
-
-  def nonnegative_softmax_kernel_feature_creator(self, x, is_query):
-    """Constructs nonnegative kernel features for fast softmax attention.
-
-    Args:
-      x: input for which features are computed.
-      is_query: predicate indicating whether input data corresponds to
-                queries or keys.
-
-    Returns:
-      Random features for fast softmax attention.
-    """
-    if self._normalize_data:
-      # We have e^{qk^T/sqrt{d}} = e^{q_norm k_norm^T}, where
-      # w_norm = w * data_normalizer for w in {q,k}.
-      data_normalizer = 1.0 / (jnp.sqrt(jnp.sqrt(x.shape[-1])))
-    else:
-      data_normalizer = 1.0
-    ratio = 1.0 / jnp.sqrt(self._projection_matrix.shape[0])
-    # TODO(wgaj): Double-check... Should there be only one batch dimension...?
-    data_mod_shape = x.shape[0:1] + self._projection_matrix.shape
-    data_thick_random_matrix = (jnp.zeros(data_mod_shape) +
-                                self._projection_matrix)
-
-    data_dash = jnp.einsum('Bij, Bkj -> Bik',
-                           data_normalizer * x,
-                           data_thick_random_matrix)
-    diag_data = jnp.square(x)
-    diag_data = jnp.sum(diag_data, axis=x.ndim - 1)
-    diag_data = (diag_data / 2.0) * data_normalizer * data_normalizer
-    diag_data = jnp.expand_dims(diag_data, axis=x.ndim - 1)
-
-    last_dims_t = (len(data_dash.shape) - 1,)
-    attention_dims_t = (1,)
-    if is_query:
-      data_dash = ratio * (
-          jnp.exp(data_dash - diag_data -
-                  jnp.max(data_dash, axis=last_dims_t, keepdims=True)) +
-          self._epsilon)
-    else:
-      data_dash = ratio * (
-          jnp.exp(data_dash - diag_data - jnp.max(
-              data_dash, axis=last_dims_t + attention_dims_t, keepdims=True)) +
-          self._epsilon)
-
-    return data_dash
 
   def forward(self, inputs):
     def favor_numerator_fwd(init_prefix_sum_value,
@@ -1196,6 +1155,13 @@ class CausalFavorAttention(base.Layer):
     favor_denominator.defvjp(favor_denominator_fwd, favor_denominator_bwd)
 
     query, key, value = inputs
+    if self._redraw_features:
+      # TODO(kchoro): Get rid of the constant below.
+      query_seed = jax.lax.convert_element_type(
+          jnp.ceil(jnp.sum(query) * 10000000.0), jnp.int32)
+      rng = random.get_prng(query_seed)
+      self.draw_weights(rng)
+
     query_prime = self.generalized_kernel_feature_creator(query)
     key_prime = self.generalized_kernel_feature_creator(key)
     prefix_sum_tensor_shape = (
