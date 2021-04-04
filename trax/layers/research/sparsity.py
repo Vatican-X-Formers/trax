@@ -969,6 +969,7 @@ class CausalFavorAttention(base.Layer):
 
   def __init__(self, d_feature=4, n_heads=1, n_random_features=256,
                numerical_stabilizer=1e-6,
+               use_approximate_softmax=True,
                scale_by_norm=True,
                normalize_data=True,
                redraw_features=True,
@@ -979,6 +980,7 @@ class CausalFavorAttention(base.Layer):
     self._n_heads = n_heads
     self._n_random_features = n_random_features
     self._numerical_stabilizer = numerical_stabilizer
+    self._use_approximate_softmax = use_approximate_softmax
     self._mode = mode
     self._scale_by_norm = scale_by_norm
     self._normalize_data = normalize_data
@@ -1162,8 +1164,15 @@ class CausalFavorAttention(base.Layer):
       rng = random.get_prng(query_seed)
       self.draw_weights(rng)
 
-    query_prime = self.generalized_kernel_feature_creator(query)
-    key_prime = self.generalized_kernel_feature_creator(key)
+    if self._use_approximate_softmax:
+      query_prime = self.generalized_kernel_feature_creator(query)
+      key_prime = self.generalized_kernel_feature_creator(key)
+    else:
+      def relu(x):
+        return jnp.where(x <= 0, jnp.zeros_like(x), x)
+      query_prime = relu(query) + self._numerical_stabilizer
+      key_prime = relu(key) + self._numerical_stabilizer
+
     prefix_sum_tensor_shape = (
       key_prime.shape[0], key_prime.shape[-1], value.shape[-1])
     t_slice_shape = (key_prime.shape[0], key_prime.shape[-1])
