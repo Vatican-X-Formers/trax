@@ -22,6 +22,8 @@ import random as pyrandom
 import numpy as np
 
 import jax
+from jax.experimental.host_callback import id_print
+
 from trax import fastmath
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
@@ -1190,6 +1192,25 @@ class CausalFavorAttention(base.Layer):
                                    query_prime, key_prime)
       return r
 
+    def naive_calc(q, k, v):
+      q = q.swapaxes(0, 1)
+      k = k.swapaxes(0, 1)
+      v = v.swapaxes(0, 1)
+      d = q.shape[-1]
+      l, nh, dv = v.shape
+
+      num = []
+      denom = []
+      for i in range(l):
+        sum = jnp.zeros((nh, d, dv))
+        sumd = jnp.zeros((nh, d))
+        for j in range(i + 1):
+          sum += jnp.einsum('hc,hd->hcd', k[j], v[j])
+          sumd += k[j]
+        num.append(jnp.einsum('hc,hcd->hd', q[i], sum))
+        denom.append(jnp.einsum('hc,hc->h', q[i], sumd))
+      return map(jnp.stack, [num, denom])
+
     favor_denominator = fastmath.custom_vjp(
         favor_denominator, favor_denominator_fwd, favor_denominator_bwd)
 
@@ -1213,11 +1234,19 @@ class CausalFavorAttention(base.Layer):
                           jnp.moveaxis(key_prime, 1, 0))
     w = jnp.moveaxis(w, 0, 1)
     r = jnp.moveaxis(r, 0, 1)
+    alt_w, alt_r = naive_calc(query_prime, key_prime, value)
+    alt_w = jnp.moveaxis(alt_w, 0, 1)
+    alt_r = jnp.moveaxis(alt_r, 0, 1)
+
+    id_print(((w - alt_w)**2).mean())
+    id_print(((r - alt_r)**2).mean())
+
     r = r + 2 * self._numerical_stabilizer * (
         jnp.abs(r) <= self._numerical_stabilizer)
     r = jnp.reciprocal(r)
     r = jnp.expand_dims(r, len(r.shape))
     renormalized_attention = w * r
+    id_print(renormalized_attention)
     return renormalized_attention
 
 

@@ -71,6 +71,7 @@ class ReformerTest(parameterized.TestCase):
     )
 
   def test_reformer_lm_forward_shape(self):
+    fastmath.disable_jit()
     vocab_size = 16
     model = reformer.ReformerLM(
         vocab_size, d_model=32, d_ff=64, d_attention_key=16,
