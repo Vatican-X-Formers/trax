@@ -19,7 +19,7 @@
 import copy
 import gzip
 import inspect
-import pickle5 as pickle
+import pickle
 import random
 import traceback
 
@@ -339,7 +339,7 @@ class Layer:
       self.state = state
     elif input_signature is not None:
       self.init(input_signature)
-    self.weights = weights
+    self.weights[:-1] = weights[:-1]
     return (self.weights, self.state)
 
   def save_to_file(self, file_name, weights_only=False, input_signature=None):
