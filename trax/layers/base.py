@@ -339,7 +339,7 @@ class Layer:
       self.state = state
     elif input_signature is not None:
       self.init(input_signature)
-    self.weights[:-1] = weights[:-1]
+    self.weights = weights[:-1] + self.weights[-1:]
     return (self.weights, self.state)
 
   def save_to_file(self, file_name, weights_only=False, input_signature=None):
