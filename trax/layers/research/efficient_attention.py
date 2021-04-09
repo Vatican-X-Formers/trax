@@ -41,6 +41,7 @@ import jax
 from trax import fastmath
 from trax.fastmath import numpy as np
 from trax.layers import attention
+from trax.layers.attention import PositionalEmbeddings
 from trax.layers import base
 from trax.layers import combinators as cb
 from trax.layers import core
@@ -1053,6 +1054,7 @@ class SelfAttention(base.Layer):
     else:
       self._attention_dropout = 0.0
       self._output_dropout = 0.0
+    self._pos_emb = PositionalEmbeddings()
 
   def _kernel_initializer(self, shape, rng):
     # Attention uses Glorot uniform initalization with respect to the *total*
@@ -1106,6 +1108,8 @@ class SelfAttention(base.Layer):
     w_q = self._kernel_initializer((d_model, self._d_qk), rng_q)
     if not self._share_qk:
       w_k = self._kernel_initializer((d_model, self._d_qk), rng_k)
+    w_l = self._kernel_initializer((d_model, self._d_qk), rng_q)
+    w_r = self._kernel_initializer((d_model, self._d_qk), rng_q)
     w_v = self._kernel_initializer((d_model, self._d_v), rng_v)
     w_o = np.transpose(self._kernel_initializer((d_model, self._d_v), rng_o))
 
@@ -1121,7 +1125,7 @@ class SelfAttention(base.Layer):
     if self._share_qk:
       return (w_q, w_v, w_o)
     else:
-      return (w_q, w_k, w_v, w_o)
+      return (w_q, w_k, w_v, w_l, w_r, w_o)
 
   def create_state_unbatched(self, input_signature, rng):
     return ()
@@ -1154,13 +1158,18 @@ class SelfAttention(base.Layer):
       if self._share_qk:
         w_q, w_v, w_o = weights
       else:
-        w_q, w_k, w_v, w_o = weights
+        w_q, w_k, w_v, w_l, w_r, w_o = weights
 
     q = np.matmul(x, w_q)
     k = None
     if not self._share_qk:
       k = np.matmul(x, w_k)
     v = np.matmul(x, w_v)
+
+    pos = self._pos_emb(x[None, ...])
+    l = np.matmul(pos, w_l)
+    r = np.matmul(pos, w_r)
+
 
     if self._bias:
       q = q + b_q
@@ -1180,7 +1189,7 @@ class SelfAttention(base.Layer):
       kv_info = kv_info * np.where(mask, ones_like_mask, -ones_like_mask)
 
     o, _ = attend(
-        q, k, v,
+        q + l, k + r, v,
         q_chunk_len=self._chunk_len,
         kv_chunk_len=self._chunk_len,
         n_chunks_before=self._n_chunks_before,
