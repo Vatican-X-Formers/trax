@@ -350,7 +350,8 @@ class RelativeAttention(base.Layer):
 
 
 def DotProductAttention(queries, keys, values, pos_emb, context_bias,
-                        location_bias, mask, separate_cls, dropout, mode, rng):
+                        location_bias, mask, separate_cls, dropout, mode, rng,
+                        chunk_len):
   """Computes new activations via masked attention-weighted sum of values.
 
   This function is the core of the attention mechanism. It:
@@ -377,15 +378,20 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     Per-head activations resulting from masked per-head attention-weighted
     sum of per-head values.
   """
-  d_feature = queries.shape[-1]
-  keys_len, queries_len = keys.shape[-2], queries.shape[-2]
-  funnel_factor, is_upsampling = calc_funnel_ratio(keys_len, queries_len)
+  bs, nh, original_l, d_feature = queries.shape
+
+  if chunk_len is None:
+    chunk_len = original_l
+
+  new_shape = (bs * (original_l // chunk_len), nh, chunk_len, d_feature)
+  queries = jnp.reshape(queries, new_shape)
+  keys = jnp.reshape(keys, new_shape)
 
   ac = jnp.einsum('bnid,bnjd->bnij', queries + context_bias, keys)
   bd = jnp.einsum('bnid,jnd->bnij', queries + location_bias, pos_emb)
 
   if mode != 'predict':
-    bd = _fast_matrix_shift(bd, funnel_factor, is_upsampling)
+    bd = _fast_matrix_shift(bd)
 
   if separate_cls:
     # Masking out location part of attention for cls token
@@ -393,8 +399,10 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     bd = bd.at[:, :, 0, :].set(0)
 
   dots = (ac + bd) / jnp.sqrt(d_feature)
-  if mask is not None:
-    dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
+
+  mask = jnp.tril(jnp.ones((queries.shape[-2], queries.shape[-2]), dtype=jnp.bool_))
+  dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
+
   # Softmax.
   dots = jnp.exp(dots - fastmath.logsumexp(dots, axis=-1, keepdims=True))
   if dropout >= 1.0:
@@ -402,6 +410,8 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
   if dropout is not None and dropout > 0.0 and mode == 'train':
     keep = fastmath.random.bernoulli(rng, 1.0 - dropout, dots.shape)
     dots = jnp.where(keep, dots / (1.0 - dropout), jnp.zeros_like(dots))
+
+  dots = jnp.reshape(dots, (-1, -1, chunk_len * queries.shape[2], ))
   out = jnp.matmul(dots, values)
   out = out.astype(jnp.float32)
   dots = dots.astype(jnp.float32)
@@ -533,7 +543,7 @@ def calc_funnel_ratio(keys_len, queries_len):
   return funnel_factor, is_upsampling
 
 
-def _fast_matrix_shift(x, funnel_factor, is_upsampling=False):
+def _fast_matrix_shift(x):
   """Fast matrix shift.
 
   Implements necessary shift for relative positional attention calculations.
@@ -552,12 +562,7 @@ def _fast_matrix_shift(x, funnel_factor, is_upsampling=False):
   #  shift: i-th row is shifted by i * shift elements to the left
   #  k: after shift, we pick every kth element
 
-  if is_upsampling:
-    k = funnel_factor
-    shift = 1
-  else:
-    k = 1
-    shift = funnel_factor
+  k, shift = 1, 1
 
   bsz, n_head = x.shape[0], x.shape[1]
   qlen, klen = x.shape[2], (x.shape[3] + 1) // 2
