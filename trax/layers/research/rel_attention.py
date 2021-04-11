@@ -74,6 +74,8 @@ def RelativeAttentionWrapper(
                                   dropout=attention_dropout,
                                   n_raw_tokens_generated=n_raw_tokens_generated,
                                   max_inference_length=max_inference_length,
+                                  chunk_len=chunk_len,
+                                  chunk_offset=chunk_offset,
                                   mode=mode)
 
 
@@ -86,6 +88,8 @@ def RelativeAttentionLayer(d_feature,
                            dropout=0.0,
                            n_raw_tokens_generated=1,
                            max_inference_length=3072,
+                           chunk_len=None,
+                           chunk_offset=None,
                            mode='train'):
   """Returns a layer that maps (q, k, v, masks) to (activations, masks).
 
@@ -132,6 +136,8 @@ def RelativeAttentionLayer(d_feature,
           dropout=dropout,
           n_raw_tokens_generated=n_raw_tokens_generated,
           max_inference_length=max_inference_length,
+          chunk_len=chunk_len,
+          chunk_offset=chunk_offset,
           mode=mode),
 
   return cb.Serial(
@@ -159,6 +165,8 @@ def RelativeAttentionLMLayer(d_feature,
                              dropout=0.0,
                              n_raw_tokens_generated=1,
                              max_inference_length=3072,
+                             chunk_len=None,
+                             chunk_offset=None,
                              mode='train'):
   """Returns a layer that maps (q, k, v) to (activations).
 
@@ -194,6 +202,8 @@ def RelativeAttentionLMLayer(d_feature,
       dropout=dropout,
       n_raw_tokens_generated=n_raw_tokens_generated,
       max_inference_length=max_inference_length,
+      chunk_len=chunk_len,
+      chunk_offset=chunk_offset,
       mode=mode)
 
   mask_layer = AttentionMaskLayer(
@@ -235,6 +245,8 @@ class RelativeAttention(base.Layer):
                dropout=0.0,
                n_raw_tokens_generated=1,
                max_inference_length=3072,
+               chunk_len=None,
+               chunk_offset=None,
                mode='train'):
     """Returns a new PureAttention instance.
 
@@ -255,6 +267,8 @@ class RelativeAttention(base.Layer):
     self._dropout = dropout
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._max_len = max_inference_length
+    self._chunk_len = chunk_len
+    self._chunk_offset = chunk_offset
     self._mode = mode
 
   def forward(self, inputs):
@@ -286,7 +300,10 @@ class RelativeAttention(base.Layer):
         mask,
         dropout=self._dropout,
         mode=self._mode,
-        rng=self.rng)
+        rng=self.rng,
+        chunk_len=self._chunk_len,
+        chunk_offset=self._chunk_offset
+    )
     if self._mode == 'viz':
       self.state = dots
     merged_results = MergeHeads(
@@ -346,7 +363,8 @@ class RelativeAttention(base.Layer):
 
 
 def DotProductAttention(queries, keys, values, pos_emb, context_bias,
-                        location_bias, mask, dropout, mode, rng):
+                        location_bias, mask, dropout, mode, rng,
+                        chunk_len, chunk_offset=0):
   """Computes new activations via masked attention-weighted sum of values.
 
   This function is the core of the attention mechanism. It:
@@ -372,28 +390,84 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     Per-head activations resulting from masked per-head attention-weighted
     sum of per-head values.
   """
-  d_feature = queries.shape[-1]
+  bs, nh, original_l, d_feature = queries.shape
 
-  ac = jnp.einsum('bnid,bnjd->bnij', queries + context_bias, keys)
-  bd = jnp.einsum('bnid,jnd->bnij', queries + location_bias, pos_emb)
+  def _calc_attn_scores(q, k):
+    ac = jnp.einsum('bnid,bnjd->bnij', q + context_bias, k)
+    bd = jnp.einsum('bnid,jnd->bnij', q + location_bias,
+                    pos_emb[:2 * k.shape[2] - 1, ...])
 
-  if mode != 'predict':
-    bd = _fast_matrix_shift(bd)
+    if mode != 'predict':
+      bd = _fast_matrix_shift(bd)
 
-  dots = (ac + bd) / jnp.sqrt(d_feature)
-  if mask is not None:
+    dots = (ac + bd) / jnp.sqrt(d_feature)
+
+    seq_len = q.shape[2]
+    mask = jnp.tril(jnp.ones((seq_len, seq_len), dtype=jnp.bool_))
     dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
-  # Softmax.
-  dots = jnp.exp(dots - fastmath.logsumexp(dots, axis=-1, keepdims=True))
-  if dropout >= 1.0:
-    raise ValueError('Dropout rates must be lower than 1.')
-  if dropout is not None and dropout > 0.0 and mode == 'train':
-    keep = fastmath.random.bernoulli(rng, 1.0 - dropout, dots.shape)
-    dots = jnp.where(keep, dots / (1.0 - dropout), jnp.zeros_like(dots))
-  out = jnp.matmul(dots, values)
+
+    # Softmax.
+    dots = jnp.exp(dots - fastmath.logsumexp(dots, axis=-1, keepdims=True))
+    if dropout >= 1.0:
+      raise ValueError('Dropout rates must be lower than 1.')
+    if dropout is not None and dropout > 0.0 and mode == 'train':
+      keep = fastmath.random.bernoulli(rng, 1.0 - dropout, dots.shape)
+      dots = jnp.where(keep, dots / (1.0 - dropout), jnp.zeros_like(dots))
+
+    return dots
+
+  if chunk_len is None or mode == 'predict':
+    dots = _calc_attn_scores(queries, keys)
+    out = jnp.matmul(dots, values)
+  else:
+    n_chunks = original_l // chunk_len
+
+    def chunk_split(v):
+      chunked_shape = (bs, nh, n_chunks, chunk_len, d_feature)
+      v = jnp.reshape(v, chunked_shape)
+      v = v.swapaxes(1, 2)
+      return jnp.reshape(v, (bs * n_chunks, nh, chunk_len, d_feature))
+
+    def chunk_join(v):
+      swapped_shape = (bs, n_chunks, nh, chunk_len, d_feature)
+      v = jnp.reshape(v, swapped_shape)
+      v = v.swapaxes(1, 2)
+      return jnp.reshape(v, (bs, nh, original_l, d_feature))
+
+    if chunk_offset == 0:
+      queries, keys, values = map(chunk_split, [queries, keys, values])
+      chunked_dots = _calc_attn_scores(queries, keys)
+      chunked_result = jnp.matmul(chunked_dots, values)
+      out = chunk_join(chunked_result)
+    else:
+      pre_len, post_len = chunk_offset, chunk_len - chunk_offset
+      total_len = queries.shape[2]
+
+      def split_along_l(v, mid_start, mid_end, end):
+        pre = jnp.take(v, indices=range(mid_start), axis=2)
+        mid = jnp.take(v, indices=range(mid_start, mid_end), axis=2)
+        post = jnp.take(v, indices=range(mid_end, end), axis=2)
+        return pre, mid, post
+
+      def permute(v):
+        pre, mid, post = split_along_l(v, pre_len, total_len - post_len,
+                                       total_len)
+        return jnp.concatenate([mid, pre, post], axis=2)
+
+      def unpermute(v):
+        mid, pre, post = split_along_l(v, total_len - chunk_len,
+                                       total_len - post_len, total_len)
+        return jnp.concatenate([pre, mid, post], axis=2)
+
+      queries, keys, values = map(lambda x: chunk_split(permute(x)),
+                                  [queries, keys, values])
+      permuted_dots = _calc_attn_scores(queries, keys)
+      permuted_out = chunk_join(jnp.matmul(permuted_dots, values))
+
+      out = unpermute(permuted_out)
+
   out = out.astype(jnp.float32)
-  dots = dots.astype(jnp.float32)
-  return out, dots
+  return out, None  # We don't store full dots matrix
 
 
 class PositionalEmbeddings(base.Layer):
