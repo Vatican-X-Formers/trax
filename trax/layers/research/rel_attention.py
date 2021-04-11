@@ -261,7 +261,8 @@ class RelativeAttention(base.Layer):
         separate_cls=self._separate_cls,
         dropout=self._dropout,
         mode=self._mode,
-        rng=self.rng)
+        rng=self.rng,
+        chunk_len=None)
     if self._mode == 'viz':
       self.state = dots
     merged_results = MergeHeads(
@@ -353,10 +354,21 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
 
   if chunk_len is None:
     chunk_len = original_l
+  n_chunks = original_l // chunk_len
 
-  new_shape = (bs * (original_l // chunk_len), nh, chunk_len, d_feature)
-  queries = jnp.reshape(queries, new_shape)
-  keys = jnp.reshape(keys, new_shape)
+  def chunk_split(v):
+    chunked_shape = (bs, nh, n_chunks, chunk_len, d_feature)
+    v = jnp.reshape(v, chunked_shape)
+    v = v.swapaxes(1, 2)
+    return jnp.reshape(v, (bs * n_chunks, nh, chunk_len, d_feature))
+
+  def chunk_join(v):
+    swapped_shape = (bs, n_chunks, nh, chunk_len, d_feature)
+    v = jnp.reshape(v, swapped_shape)
+    v = v.swapaxes(1, 2)
+    return jnp.reshape(v, (bs, nh, original_l, d_feature))
+
+  queries, keys, values = map(chunk_split, [queries, keys, values])
 
   ac = jnp.einsum('bnid,bnjd->bnij', queries + context_bias, keys)
   bd = jnp.einsum('bnid,jnd->bnij', queries + location_bias, pos_emb)
@@ -371,7 +383,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
 
   dots = (ac + bd) / jnp.sqrt(d_feature)
 
-  mask = jnp.tril(jnp.ones((queries.shape[-2], queries.shape[-2]), dtype=jnp.bool_))
+  mask = jnp.tril(jnp.ones((chunk_len, chunk_len), dtype=jnp.bool_))
   dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
 
   # Softmax.
@@ -382,11 +394,10 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     keep = fastmath.random.bernoulli(rng, 1.0 - dropout, dots.shape)
     dots = jnp.where(keep, dots / (1.0 - dropout), jnp.zeros_like(dots))
 
-  dots = jnp.reshape(dots, (-1, -1, chunk_len * queries.shape[2], ))
   out = jnp.matmul(dots, values)
+  out = chunk_join(out)
   out = out.astype(jnp.float32)
-  dots = dots.astype(jnp.float32)
-  return out, dots
+  return out, None  # We don't store full dots matrix
 
 
 class PositionalEmbeddings(base.Layer):
