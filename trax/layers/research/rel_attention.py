@@ -390,7 +390,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
   def _calc_attn_scores(q, k):
     ac = jnp.einsum('bnid,bnjd->bnij', q + context_bias, k)
     bd = jnp.einsum('bnid,jnd->bnij', q + location_bias,
-                    pos_emb[:k.shape[2] + 1, ...])
+                    pos_emb[:2 * k.shape[2] - 1, ...])
 
     if mode != 'predict':
       bd = _fast_matrix_shift(bd)
