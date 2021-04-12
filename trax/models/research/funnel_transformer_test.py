@@ -122,7 +122,8 @@ class FunnelTransformerTest(parameterized.TestCase):
   def test_funnel_transformer_lm_forward_shape(self):
     d_model = 8
     vocab_size = 7
-    x = np.ones((3, 6)).astype(np.int32)
+    len = 48
+    x = np.ones((3, len)).astype(np.int32)
 
     simple_funnel = ft.RelformerLM(
         vocab_size,
@@ -130,11 +131,12 @@ class FunnelTransformerTest(parameterized.TestCase):
         n_rel_layers=1,
         vanilla_layers=(1, 1),
         d_model=d_model, d_ff=d_model, n_heads=2,
-        vanilla_attn_type=tl.SelfAttention
+        vanilla_attn_type=tl.SelfAttention,
+        rel_chunk_len=2,
     )
     _, _ = simple_funnel.init(shapes.signature(x))
     y = simple_funnel(x)
-    self.assertEqual(y.shape, (3, 6, vocab_size))
+    self.assertEqual(y.shape, (3, len, vocab_size))
 
     # multi_stage_funnel = ft.FunnelTransformerLM(
     #     vocab_size,
