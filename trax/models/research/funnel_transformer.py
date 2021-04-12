@@ -431,18 +431,11 @@ def _get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
   return context_bias_layer, location_bias_layer
 
 
-def _RelativeDecoderBlock(d_model,
-                          d_ff,
-                          n_heads,
-                          dropout,
-                          dropout_shared_axes,
-                          mode,
-                          ff_activation,
-                          context_bias_layer,
-                          location_bias_layer,
-                          total_pooling,
-                          max_inference_length=3072,
-                          rel_chunk_len=None):
+def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+                          mode, ff_activation, context_bias_layer,
+                          location_bias_layer, total_pooling, i,
+                          max_inference_length=3072, rel_chunk_len=None,
+                          chunk_offset=None):
   """Returns a list of layers that implements a Transformer encoder block.
 
   The input to the block is a pair, (activations, mask), where the mask was
@@ -482,6 +475,7 @@ def _RelativeDecoderBlock(d_model,
       dropout=dropout,
       max_inference_length=max_inference_length,
       chunk_len=rel_chunk_len,
+      chunk_offset=chunk_offset,
       mode=mode)
 
   feed_forward = _FeedForwardBlock(
@@ -920,7 +914,10 @@ def RelformerLM(vocab_size,
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                               dropout_shared_axes, mode, ff_activation,
                               context_bias_layer, location_bias_layer,
-                              total_pooling, max_len, rel_chunk_len) for _ in
+                              total_pooling, max_len,
+                              rel_chunk_len=rel_chunk_len,
+                              chunk_offset=(rel_chunk_len // 2) * (
+                                  i % 2) if rel_chunk_len else None) for i in
         range(n_layers)
     ]
     return decoder_blocks + [tl.LayerNorm()]

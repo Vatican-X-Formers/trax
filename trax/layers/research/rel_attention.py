@@ -88,6 +88,7 @@ def RelativeAttentionLayer(d_feature,
                            n_raw_tokens_generated=1,
                            max_inference_length=3072,
                            chunk_len=None,
+                           chunk_offset=None,
                            mode='train'):
   """Returns a layer that maps (q, k, v, masks) to (activations, masks).
 
@@ -148,6 +149,7 @@ def RelativeAttentionLayer(d_feature,
           n_raw_tokens_generated=n_raw_tokens_generated,
           max_inference_length=max_inference_length,
           chunk_len=chunk_len,
+          chunk_offset=chunk_offset,
           mode=mode),
       core.Dense(d_feature),
   )
@@ -164,6 +166,7 @@ def RelativeAttentionLMLayer(d_feature,
                              n_raw_tokens_generated=1,
                              max_inference_length=3072,
                              chunk_len=None,
+                             chunk_offset=None,
                              mode='train'):
   """Returns a layer that maps (q, k, v) to (activations).
 
@@ -200,6 +203,7 @@ def RelativeAttentionLMLayer(d_feature,
       n_raw_tokens_generated=n_raw_tokens_generated,
       max_inference_length=max_inference_length,
       chunk_len=chunk_len,
+      chunk_offset=chunk_offset,
       mode=mode)
 
   return cb.Serial(
@@ -241,6 +245,7 @@ class RelativeAttention(base.Layer):
                n_raw_tokens_generated=1,
                max_inference_length=3072,
                chunk_len=None,
+               chunk_offset=None,
                mode='train'):
     """Returns a new PureAttention instance.
 
@@ -264,6 +269,7 @@ class RelativeAttention(base.Layer):
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._max_len = max_inference_length
     self._chunk_len = chunk_len
+    self._chunk_offset = chunk_offset
     self._mode = mode
 
   def forward(self, inputs):
@@ -297,7 +303,9 @@ class RelativeAttention(base.Layer):
         dropout=self._dropout,
         mode=self._mode,
         rng=self.rng,
-        chunk_len=self._chunk_len)
+        chunk_len=self._chunk_len,
+        chunk_offset=self._chunk_offset
+    )
     if self._mode == 'viz':
       self.state = dots
     merged_results = MergeHeads(
@@ -433,8 +441,6 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
       v = jnp.reshape(v, swapped_shape)
       v = v.swapaxes(1, 2)
       return jnp.reshape(v, (bs, nh, original_l, d_feature))
-
-    chunk_offset = chunk_len // 2  # TODO: param
 
     if chunk_offset == 0:
       queries, keys, values = map(chunk_split, [queries, keys, values])
