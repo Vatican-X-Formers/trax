@@ -902,8 +902,6 @@ def RelformerLM(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
-  positional_encoder = PositionalEncoder(mode, dropout, max_len, pos_type)
-
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
   def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
@@ -983,7 +981,6 @@ def RelformerLM(vocab_size,
   return tl.Serial(  # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,  # vecs
-      positional_encoder,
       pre_decoder_blocks,  # vecs
       tl.Dup(),
       cacher,
