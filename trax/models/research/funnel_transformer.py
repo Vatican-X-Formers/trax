@@ -979,7 +979,7 @@ def RelformerLM(vocab_size,
       _UpsamplerLM(shorten_factor, d_model),
       tl.LayerNorm(),
       picker,
-      tl.Concatenate(),
+      tl.Add(),
       post_decoder_blocks,
       tl.Dense(vocab_size),  # vecs
   )
