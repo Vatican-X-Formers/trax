@@ -93,20 +93,6 @@ def RelativeAttentionLayer(d_feature,
                            mode='train'):
   """Returns a layer that maps (q, k, v, masks) to (activations, masks).
 
-  When number of keys is smaller than number of queries layer works in O(q^2*d).
-  Otherwise it is O(q*k*d). That is because we need to shift relative distances
-  by current_pooling. When we upsample this is current pooling is a fraction < 1
-  Visual explanation:
-  [01][23][45][67] -> [0][1][2][3][4][5][6][7]
-  For token [0] we calculate relative distances as follows:
-  * 0 2 4 6
-  However for token [1] we need relative distances changed by 1, specifically:
-  * -1 1 3 5
-  So we not only need to calculate the distances that corresponds to spacing
-  between the keys but also for the ones in between because there are more than
-  one query tokens (on different positions which means different relative
-  distances) for single key token.
-
   Args:
     d_feature: Depth/dimensionality of feature embedding.
     context_bias_layer: Global context bias from Transformer XL's attention.
@@ -615,33 +601,18 @@ class AttentionMaskLayer(base.Layer):
     self._mode = mode
 
   def forward(self, inputs):
-    batch_size, queries_len, _ = inputs.shape
-    return self._funnel_mask(batch_size, queries_len)
-
-  def _funnel_mask(self, batch_size, queries_len):
-    """Creates a funnel mask.
-
-    This function based on keys/queries lengths creates a triangle mask
-    that prevents tokens from attending to positions following it.
-
-    Args:
-      batch_size: batch size.
-      queries_len: queries length.
-
-    Returns:
-      Funnel mask.
-    """
+    inputs_len = inputs.shape[1]
 
     if self._mode == 'predict':
       # We cannot generate more than one token because it contradicts
       # all autoregressive properties
-      assert queries_len == 1
+      assert inputs_len == 1
       mask = jnp.arange(self._max_len) <= (self.state // self._total_kv_pooling)
       mask = jnp.reshape(mask, (1, self._max_len))
       self.state += self._n_raw_tokens_generated
       return mask
 
-    mask = jnp.tril(jnp.ones((queries_len, queries_len), dtype=jnp.bool_))
+    mask = jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
     return mask
 
   def init_weights_and_state(self, input_signature):
