@@ -525,7 +525,7 @@ def bucket_by_length(generator, length_fn, boundaries, batch_sizes,
   Yields:
     An input batch, which comes from one of the buckets.
   """
-  buckets = [[] for _ in range(len(batch_sizes))]
+  buckets = [[] for _ in range(len(batch_sizes) + 1)]
   boundaries = boundaries + [math.inf]  # Max boundary is unlimited.
   for example in generator:
     length = length_fn(example)
