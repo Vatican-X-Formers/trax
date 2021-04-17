@@ -70,8 +70,9 @@ def RelativeAttentionWrapper(
         chunk_offset=64):
   # TODO: this will be attn_type for DecoderBlock
   del d_v, causal, masked, output_dropout
-  return RelativeAttentionLMLayer(d_qk * n_heads, context_bias_layer,
-                                  location_bias_layer,
+  return RelativeAttentionLMLayer(d_feature=d_qk * n_heads,
+                                  context_bias_layer=context_bias_layer,
+                                  location_bias_layer=location_bias_layer,
                                   total_kv_pooling=total_kv_pooling,
                                   n_heads=n_heads,
                                   dropout=attention_dropout,
@@ -255,6 +256,10 @@ class RelativeAttention(base.Layer):
         through this layer. Used only in 'predict' non-training mode.
       max_inference_length: Maximum sequence length allowed in non-training
         modes.
+      chunk_len (optional): Number of tokens per chunk. Setting this option will
+        enable chunked attention.
+      chunk_offset (optional): Offset for shifting chunks, for shifted chunked
+        attention
       mode: One of `'train'`, `'eval'`, or `'predict'`.
     """
     super().__init__(n_in=7, n_out=2)
@@ -390,7 +395,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     Per-head activations resulting from masked per-head attention-weighted
     sum of per-head values.
   """
-  bs, nh, original_l, d_feature = queries.shape
+  batch_size, n_heads, original_l, d_feature = queries.shape
 
   def _calc_attn_scores(q, k):
     ac = jnp.einsum('bnid,bnjd->bnij', q + context_bias, k)
@@ -419,16 +424,17 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     n_chunks = original_l // chunk_len
 
     def chunk_split(v):
-      chunked_shape = (bs, nh, n_chunks, chunk_len, d_feature)
+      chunked_shape = (batch_size, n_heads, n_chunks, chunk_len, d_feature)
       v = jnp.reshape(v, chunked_shape)
       v = v.swapaxes(1, 2)
-      return jnp.reshape(v, (bs * n_chunks, nh, chunk_len, d_feature))
+      return jnp.reshape(v,
+                         (batch_size * n_chunks, n_heads, chunk_len, d_feature))
 
     def chunk_join(v):
-      swapped_shape = (bs, n_chunks, nh, chunk_len, d_feature)
+      swapped_shape = (batch_size, n_chunks, n_heads, chunk_len, d_feature)
       v = jnp.reshape(v, swapped_shape)
       v = v.swapaxes(1, 2)
-      return jnp.reshape(v, (bs, nh, original_l, d_feature))
+      return jnp.reshape(v, (batch_size, n_heads, original_l, d_feature))
 
     if chunk_offset == 0:
       queries, keys, values = map(chunk_split, [queries, keys, values])
