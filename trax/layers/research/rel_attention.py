@@ -64,8 +64,8 @@ def RelativeAttentionWrapper(
         location_bias_layer=None,
         n_raw_tokens_generated=None,
         max_inference_length=3072,
-        chunk_len=None,
-        chunk_offset=None):
+        chunk_len=128,
+        chunk_offset=64):
   # TODO: this will be attn_type for DecoderBlock
   del d_v, causal, masked, output_dropout
   return RelativeAttentionLMLayer(d_qk * n_heads, context_bias_layer,
@@ -74,6 +74,8 @@ def RelativeAttentionWrapper(
                                   dropout=attention_dropout,
                                   n_raw_tokens_generated=n_raw_tokens_generated,
                                   max_inference_length=max_inference_length,
+                                  chunk_len=chunk_len,
+                                  chunk_offset=chunk_offset,
                                   mode=mode)
 
 
