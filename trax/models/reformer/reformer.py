@@ -15,15 +15,18 @@
 
 # Lint as: python3
 """Reformer Models."""
+import functools
 
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
+from trax.layers import RelativeAttentionWrapper
 from trax.models.research import configurable_transformer as ct
 from trax.models.research import transformer2 as t2
 
 
 # Layers are always CamelCase, but functions in general are snake_case
 # pylint: disable=invalid-name
+from trax.models.research.funnel_transformer import _get_rel_att_inputs
 
 
 def DecoderBlock(d_model, d_ff, d_attention_key, d_attention_value,
@@ -142,16 +145,20 @@ def ReformerLM(vocab_size,
   Returns:
     the layer.
   """
-  positional_encoding = ct.PositionalEncoder(
-      mode, dropout, max_len, pos_type, pos_axial_shape, pos_d_axial_embs)
-
   positional_embedder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
-      positional_encoding,
   ]
 
   decoder_blocks = []
+
+  context_bias, location_bias = _get_rel_att_inputs(d_model, n_heads)
+
+  rel_wrapper = functools.partial(RelativeAttentionWrapper,
+                                  context_bias_layer=context_bias,
+                                  location_bias_layer=location_bias)
+
+  attention_type = rel_wrapper
 
   if isinstance(attention_type, (tuple, list)):
     assert n_layers % len(attention_type) == 0
