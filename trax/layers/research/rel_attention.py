@@ -82,7 +82,7 @@ def RelativeAttentionWrapper(
                                   mode=mode)
 
 
-@assert_shape('bld,...->bld,...')
+# @assert_shape('bld,...->bld,...')
 def RelativeAttentionLayer(d_feature,
                            context_bias_layer,
                            location_bias_layer,
@@ -153,7 +153,6 @@ def RelativeAttentionLMLayer(d_feature,
                              context_bias_layer,
                              location_bias_layer,
                              total_kv_pooling,
-                             separate_cls=False,
                              n_heads=1,
                              dropout=0.0,
                              n_raw_tokens_generated=1,
@@ -194,7 +193,6 @@ def RelativeAttentionLMLayer(d_feature,
       context_bias_layer,
       location_bias_layer,
       total_kv_pooling,
-      separate_cls,
       n_heads=n_heads,
       dropout=dropout,
       n_raw_tokens_generated=n_raw_tokens_generated,
