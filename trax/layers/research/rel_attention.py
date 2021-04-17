@@ -79,7 +79,7 @@ def RelativeAttentionWrapper(
                                   mode=mode)
 
 
-@assert_shape('bld,b1xp->bld,b1xp')
+@assert_shape('bld,...->bld,...')
 def RelativeAttentionLayer(d_feature,
                            context_bias_layer,
                            location_bias_layer,
@@ -372,7 +372,7 @@ class RelativeAttention(base.Layer):
 
 def DotProductAttention(queries, keys, values, pos_emb, context_bias,
                         location_bias, mask, dropout, mode, rng,
-                        chunk_len, chunk_offset=0):
+                        chunk_len, chunk_offset):
   """Computes new activations via masked attention-weighted sum of values.
 
   This function is the core of the attention mechanism. It:
@@ -393,6 +393,10 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
       (based on query-key pairs) before applying them to values.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
     rng: Single-use random number generator (JAX PRNG key).
+    chunk_len (optional): Number of tokens per chunk. Setting this option will
+      enable chunked attention.
+    chunk_offset (optional): Offset for shifting chunks, for shifted chunked
+      attention
 
   Returns:
     Per-head activations resulting from masked per-head attention-weighted
@@ -409,9 +413,6 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
       bd = _fast_matrix_shift(bd)
 
     dots = (ac + bd) / jnp.sqrt(d_feature)
-
-    seq_len = q.shape[2]
-    mask = jnp.tril(jnp.ones((seq_len, seq_len), dtype=jnp.bool_))
     dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
 
     # Softmax.
@@ -425,8 +426,8 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     return dots
 
   if chunk_len is None or mode == 'predict':
-    dots = _calc_attn_scores(queries, keys)
-    out = jnp.matmul(dots, values)
+    chunked_dots = _calc_attn_scores(queries, keys)
+    out = jnp.matmul(chunked_dots, values)
   else:
     n_chunks = original_l // chunk_len
 
@@ -484,7 +485,6 @@ class PositionalEmbeddings(base.Layer):
   Returns a layer that based on queries, keys and accumulated pool size of
   keys/values until this layer calculates sinusoidal positional embeddings
   for relative attention calculations.
-
   """
 
   def __init__(self,
@@ -523,16 +523,16 @@ class PositionalEmbeddings(base.Layer):
     pos_emb = Sinusoidal_Embeddings(positions, self._d_feature)
     return pos_emb
 
-  def PositionsVectors(self, keys):
+  def PositionsVectors(self, inputs):
     if self._mode == 'predict':
-      cur_token = self.state // self._total_kv_pooling
+      cur_token = (self.state // self._total_kv_pooling) % self._chunk_len
       positions = jnp.arange(0, self._max_len, 1.0) - cur_token
-      positions = positions * self._total_kv_pooling
-      self.state = (self.state + self._n_raw_tokens_generated) % self.chunk_len
+      positions = positions
+      self.state = self.state + self._n_raw_tokens_generated
       return positions
 
-    keys_len = keys.shape[1]
-    positions = jnp.arange(-keys_len + 1, keys_len, 1.0)
+    inputs_len = inputs.shape[1]
+    positions = jnp.arange(-inputs_len + 1, inputs_len, 1.0)
 
     return positions
 
@@ -637,13 +637,12 @@ class AttentionMaskLayer(base.Layer):
       # all autoregressive properties
       assert queries_len == 1
       mask = jnp.arange(self._max_len) <= (self.state // self._total_kv_pooling)
-      mask = jnp.reshape(mask, (1, 1, 1, self._max_len))
-      mask = jnp.repeat(mask, batch_size, axis=0)
+      mask = jnp.reshape(mask, (1, self._max_len))
       self.state += self._n_raw_tokens_generated
       return mask
 
     mask = jnp.tril(jnp.ones((queries_len, queries_len), dtype=jnp.bool_))
-    return jnp.repeat(mask[None, None, :, :], batch_size, axis=0)
+    return mask
 
   def init_weights_and_state(self, input_signature):
     """Initializes this layer for fast inference, if in ``'predict'`` mode."""
