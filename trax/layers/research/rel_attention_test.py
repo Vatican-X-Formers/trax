@@ -47,14 +47,6 @@ def _get_xs(q, k, batch=1, d_model=5):
 
 class RelAttentionTest(absltest.TestCase):
 
-  def test_shift_right_cls(self):
-    layer = ra.ShiftRightCls(5)
-    x = np.array([[1, 2, 3, 4]])
-    _, _ = layer.init(shapes.signature(x))
-    y = layer(x)
-
-    self.assertEqual(tl.to_list(y), [[5, 1, 2, 3]])
-
   def test_fast_shift_matrix_funnel_1(self):
     layer = ra._fast_matrix_shift
     x = np.array([[[[-3., -2., -1., 0., 1., 2., 3.],
@@ -62,7 +54,7 @@ class RelAttentionTest(absltest.TestCase):
                     [-3., -2., -1., 0., 1., 2., 3.],
                     [-3., -2., -1., 0., 1., 2., 3.]]]]).astype(np.float32)
 
-    y = layer(x, funnel_factor=1, is_upsampling=False)
+    y = layer(x, shift=1)
     self.assertEqual(y.dtype, np.float32)
     self.assertEqual(tl.to_list(y), [[[[0., 1., 2., 3.],
                                        [-1., 0., 1., 2.],
@@ -74,7 +66,7 @@ class RelAttentionTest(absltest.TestCase):
     x = np.array([[[[-3., -2., -1., 0., 1., 2., 3.],
                     [-3., -2., -1., 0., 1., 2., 3.]]]]).astype(np.float32)
 
-    y = layer(x, funnel_factor=2, is_upsampling=False)
+    y = layer(x, shift=2)
     self.assertEqual(y.dtype, np.float32)
     self.assertEqual(tl.to_list(y), [[[[0., 1., 2., 3.],
                                        [-2., -1., 0., 1.]]]])
@@ -88,7 +80,7 @@ class RelAttentionTest(absltest.TestCase):
         [-3., -2., -1., 0., 1., 2., 3.],
     ]]]).astype(np.float32)
 
-    y = layer(x, funnel_factor=2, is_upsampling=True)
+    y = layer(x, shift=2)
     self.assertEqual(y.dtype, np.float32)
     self.assertEqual(tl.to_list(y), [[[[0., 2.],
                                        [-1., 1.],
@@ -154,7 +146,6 @@ class RelAttentionTest(absltest.TestCase):
     max_inference_length = 3
     layer = ra.PositionalEmbeddings(
         d_feature=d_feature,
-        separate_cls=False,
         total_kv_pooling=2,
         n_raw_tokens_generated=1,
         max_inference_length=3,

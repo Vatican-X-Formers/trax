@@ -52,20 +52,20 @@ from trax.layers.attention import SplitIntoHeads
 
 
 def RelativeAttentionWrapper(
-        n_heads=1,
-        d_qk=64,
-        d_v=64,
-        causal=False,
-        masked=False,
-        output_dropout=0.0,
-        attention_dropout=0.0,
-        mode='train',
-        context_bias_layer=None,
-        location_bias_layer=None,
-        n_raw_tokens_generated=None,
-        max_inference_length=3072,
-        chunk_len=None,
-        chunk_offset=None):
+    n_heads=1,
+    d_qk=64,
+    d_v=64,
+    causal=False,
+    masked=False,
+    output_dropout=0.0,
+    attention_dropout=0.0,
+    mode='train',
+    context_bias_layer=None,
+    location_bias_layer=None,
+    n_raw_tokens_generated=None,
+    max_inference_length=3072,
+    chunk_len=None,
+    chunk_offset=None):
   # TODO: this will be attn_type for DecoderBlock
   del d_v, causal, masked, output_dropout
   return RelativeAttentionLMLayer(d_qk * n_heads, context_bias_layer,
@@ -82,7 +82,6 @@ def RelativeAttentionLayer(d_feature,
                            context_bias_layer,
                            location_bias_layer,
                            total_kv_pooling,
-                           separate_cls,
                            n_heads=1,
                            dropout=0.0,
                            n_raw_tokens_generated=1,
@@ -111,7 +110,6 @@ def RelativeAttentionLayer(d_feature,
     location_bias_layer: Global location bias from Transformer XL's attention.
       There should be one such layer shared for all relative attention layers.
     total_kv_pooling: Accumulated pool size of keys/values used at this layer.
-    separate_cls: True/False if we separate_cls in calculations.
     n_heads: Number of attention heads.
     dropout: Probabilistic rate for internal dropout applied to attention
       activations (based on query-key pairs) before dotting them with values.
@@ -122,12 +120,19 @@ def RelativeAttentionLayer(d_feature,
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
   pos_emb = PositionalEmbeddings(
-              d_feature,
-              separate_cls,
-              total_kv_pooling,
-              n_raw_tokens_generated=n_raw_tokens_generated,
-              max_inference_length=max_inference_length,
-              mode=mode)
+      d_feature,
+      total_kv_pooling,
+      n_raw_tokens_generated=n_raw_tokens_generated,
+      max_inference_length=max_inference_length,
+      mode=mode)
+
+  attention = RelativeAttention(  # pylint: disable=no-value-for-parameter
+          total_kv_pooling=total_kv_pooling,
+          n_heads=n_heads,
+          dropout=dropout,
+          n_raw_tokens_generated=n_raw_tokens_generated,
+          max_inference_length=max_inference_length,
+          mode=mode),
 
   return cb.Serial(
       cb.Branch(
@@ -139,14 +144,7 @@ def RelativeAttentionLayer(d_feature,
       ),
       context_bias_layer,
       location_bias_layer,
-      RelativeAttention(  # pylint: disable=no-value-for-parameter
-          total_kv_pooling=total_kv_pooling,
-          separate_cls=separate_cls,
-          n_heads=n_heads,
-          dropout=dropout,
-          n_raw_tokens_generated=n_raw_tokens_generated,
-          max_inference_length=max_inference_length,
-          mode=mode),
+      attention,
       core.Dense(d_feature),
   )
 
@@ -198,14 +196,16 @@ def RelativeAttentionLMLayer(d_feature,
       max_inference_length=max_inference_length,
       mode=mode)
 
-  return cb.Serial(
-      cb.Branch(
-        None,
-        AttentionMaskLayer(
+  mask_layer = AttentionMaskLayer(
           total_kv_pooling=total_kv_pooling,
           n_raw_tokens_generated=n_raw_tokens_generated,
           max_inference_length=max_inference_length,
-          mode=mode),  # q, k, v, mask
+          mode=mode)
+
+  return cb.Serial(
+      cb.Branch(
+        None,
+        mask_layer,  # q, k, v, mask
       ),
       attention,  # vecs, mask
       cb.Select([0], n_in=2),  # vecs
@@ -231,7 +231,6 @@ class RelativeAttention(base.Layer):
 
   def __init__(self,
                total_kv_pooling,
-               separate_cls,
                n_heads=1,
                dropout=0.0,
                n_raw_tokens_generated=1,
@@ -241,7 +240,6 @@ class RelativeAttention(base.Layer):
 
     Args:
       total_kv_pooling: Total shorten factor used in the model
-      separate_cls: True/False if we separate_cls in calculations.
       n_heads: Number of attention heads.
       dropout: Probabilistic rate for dropout applied to attention strengths
         (based on query-key pairs) before applying them to values.
@@ -253,7 +251,6 @@ class RelativeAttention(base.Layer):
     """
     super().__init__(n_in=7, n_out=2)
     self._total_kv_pooling = total_kv_pooling
-    self._separate_cls = separate_cls
     self._n_heads = n_heads
     self._dropout = dropout
     self._n_raw_tokens_generated = n_raw_tokens_generated
@@ -287,7 +284,6 @@ class RelativeAttention(base.Layer):
         context_bias,
         location_bias,
         mask,
-        separate_cls=self._separate_cls,
         dropout=self._dropout,
         mode=self._mode,
         rng=self.rng)
@@ -350,7 +346,7 @@ class RelativeAttention(base.Layer):
 
 
 def DotProductAttention(queries, keys, values, pos_emb, context_bias,
-                        location_bias, mask, separate_cls, dropout, mode, rng):
+                        location_bias, mask, dropout, mode, rng):
   """Computes new activations via masked attention-weighted sum of values.
 
   This function is the core of the attention mechanism. It:
@@ -367,7 +363,6 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     context_bias: Global context bias from Transformer XL's attention.
     location_bias: Global location bias from Transformer XL's attention.
     mask: Mask that distinguishes positions with real content vs. padding.
-    separate_cls: True/False if we separate_cls in calculations.
     dropout: Probabilistic rate for dropout applied to attention strengths
       (based on query-key pairs) before applying them to values.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
@@ -378,19 +373,12 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     sum of per-head values.
   """
   d_feature = queries.shape[-1]
-  keys_len, queries_len = keys.shape[-2], queries.shape[-2]
-  funnel_factor, is_upsampling = calc_funnel_ratio(keys_len, queries_len)
 
   ac = jnp.einsum('bnid,bnjd->bnij', queries + context_bias, keys)
   bd = jnp.einsum('bnid,jnd->bnij', queries + location_bias, pos_emb)
 
   if mode != 'predict':
-    bd = _fast_matrix_shift(bd, funnel_factor, is_upsampling)
-
-  if separate_cls:
-    # Masking out location part of attention for cls token
-    bd = bd.at[:, :, :, 0].set(0)
-    bd = bd.at[:, :, 0, :].set(0)
+    bd = _fast_matrix_shift(bd)
 
   dots = (ac + bd) / jnp.sqrt(d_feature)
   if mask is not None:
@@ -419,76 +407,50 @@ class PositionalEmbeddings(base.Layer):
 
   def __init__(self,
                d_feature,
-               separate_cls,
                total_kv_pooling,
-               n_raw_tokens_generated=1,
                max_inference_length=3072,
+               chunk_len=None,
+               n_raw_tokens_generated=1,
                mode='train'):
     """The init method of positional embeddings.
 
     Args:
       d_feature: Depth/dimensionality of feature embedding.
-      separate_cls: True/False if we separate_cls in calculations.
       total_kv_pooling: Accumulated pool size of keys/values until this layer.
-      n_raw_tokens_generated: Number of tokens generated in a single pass
-        through this layer. Used only in 'predict' non-training mode.
       max_inference_length: Maximum sequence length allowed in non-training
         modes.
+      chunk_len (optional): Number of tokens per chunk. Setting this option will
+        enable chunked attention.
+      n_raw_tokens_generated: Number of tokens generated in a single pass
+        through this layer. Used only in 'predict' non-training mode.
       mode: One of `'train'`, `'eval'`, or `'predict'`.
 
     Returns:
       Positional embedding.
     """
-    super().__init__(n_in=2, n_out=1)
+    super().__init__(n_in=1, n_out=1)
     self._d_feature = d_feature
-    self._separate_cls = separate_cls
     self._total_kv_pooling = total_kv_pooling
-    self._n_raw_tokens_generated = n_raw_tokens_generated
     self._max_len = max_inference_length
+    self._chunk_len = chunk_len if chunk_len is not None else self._max_len
+    self._n_raw_tokens_generated = n_raw_tokens_generated
     self._mode = mode
 
   def forward(self, inputs):
-    queries = keys = inputs[0]
-    positions = self.PositionsVectors(queries, keys)
+    positions = self.PositionsVectors(inputs)
     pos_emb = Sinusoidal_Embeddings(positions, self._d_feature)
     return pos_emb
 
-  def PositionsVectors(self, queries, keys):
+  def PositionsVectors(self, keys):
     if self._mode == 'predict':
-      assert queries.shape[1] == 1
       cur_token = self.state // self._total_kv_pooling
       positions = jnp.arange(0, self._max_len, 1.0) - cur_token
       positions = positions * self._total_kv_pooling
-      self.state += self._n_raw_tokens_generated
+      self.state = (self.state + self._n_raw_tokens_generated) % self.chunk_len
       return positions
 
-    is_funnel_layer = queries.shape != keys.shape
-    keys_len, queries_len = keys.shape[1], queries.shape[1]
-    current_pooling_ratio = keys_len / queries_len
-
-    # Special case of upsampling
-    if is_funnel_layer and current_pooling_ratio < 1:
-      # We should not be doing standard upsampling when we use separate_cls
-      # Cls token is being used for classification
-      assert not self._separate_cls
-      assert (self._total_kv_pooling * keys_len) % queries_len == 0
-      multiplier = ((self._total_kv_pooling * keys_len) // queries_len)
-      positions = jnp.arange(-queries_len + 1, queries_len, 1.0) * multiplier
-    else:
-      positions = jnp.arange(-keys_len + 1, keys_len, 1.0) * \
-                  self._total_kv_pooling
-
-    if is_funnel_layer and self._separate_cls:
-      # For pool_size 2 without separating cls we have got
-      # [0][1][2][3][4][5][6][7] -> [01][23][45][67]
-      # With separating cls we have got
-      # [0][1][2][3][4][5][6][7] -> [0][12][34][56]
-
-      # First group always will always consist of one token after pooling
-      # instead of (pool_size) tokens. We need to add proper offset so
-      # that our shift later on in calculating attention works properly
-      cls_offset = (current_pooling_ratio - 1) * self._total_kv_pooling
-      positions = positions + cls_offset
+    keys_len = keys.shape[1]
+    positions = jnp.arange(-keys_len + 1, keys_len, 1.0)
 
     return positions
 
@@ -512,62 +474,34 @@ def Sinusoidal_Embeddings(positions, d_feature):
   Returns:
     Positional embeddings.
   """
-  inv_freq = 1 / (10000**(jnp.arange(0.0, d_feature, 2.0) / d_feature))
+  inv_freq = 1 / (10000 ** (jnp.arange(0.0, d_feature, 2.0) / d_feature))
   sinusoid_freq = jnp.einsum('i,j->ij', positions, inv_freq)
   pos_emb = jnp.concatenate(
       [jnp.sin(sinusoid_freq), jnp.cos(sinusoid_freq)], axis=1)
   return pos_emb
 
 
-def calc_funnel_ratio(keys_len, queries_len):
-  """Calculates funnel ratio."""
-  if queries_len > keys_len:  # Upsampling
-    assert queries_len % keys_len == 0
-    funnel_factor = queries_len // keys_len
-    is_upsampling = True
-  else:  # Downsampling
-    assert keys_len % queries_len == 0
-    funnel_factor = keys_len // queries_len
-    is_upsampling = False
-
-  return funnel_factor, is_upsampling
-
-
-def _fast_matrix_shift(x, funnel_factor, is_upsampling=False):
+def _fast_matrix_shift(x, shift=1):
   """Fast matrix shift.
 
   Implements necessary shift for relative positional attention calculations.
-  Based on funnel_factor and information whether we perform upsampling
-  or downsampling it calculates necessary shift and interval at which
-  we pick correct values for attention.
 
   Args:
     x: matrix.
-    funnel_factor: factor to be used for shift.
-    is_upsampling: determines whether perform upsampling.
+    shift: i-th row is shifted by i * shift elements to the left
 
   Returns:
     Shifted matrix x.
   """
-  #  shift: i-th row is shifted by i * shift elements to the left
-  #  k: after shift, we pick every kth element
+  batch_size, n_head = x.shape[0], x.shape[1]
+  queries_len, keys_len = x.shape[2], (x.shape[3] + 1) // 2
 
-  if is_upsampling:
-    k = funnel_factor
-    shift = 1
-  else:
-    k = 1
-    shift = funnel_factor
-
-  bsz, n_head = x.shape[0], x.shape[1]
-  qlen, klen = x.shape[2], (x.shape[3] + 1) // 2
-
-  zero_pad = jnp.zeros((bsz, n_head, qlen, shift))
+  zero_pad = jnp.zeros((batch_size, n_head, queries_len, shift))
   x = jnp.concatenate([zero_pad, x], axis=3)
-  x = x.reshape(bsz, n_head, 2 * klen - 1 + shift, qlen)
+  x = x.reshape(batch_size, n_head, 2 * keys_len - 1 + shift, queries_len)
   x = x[:, :, shift:, :]
-  x = x.reshape(bsz, n_head, qlen, klen * 2 - 1)
-  x = x[:, :, :, shift - 1:shift - 1 + klen:k]
+  x = x.reshape(batch_size, n_head, queries_len, keys_len * 2 - 1)
+  x = x[:, :, :, shift - 1:shift - 1 + keys_len]
   return x
 
 
@@ -594,43 +528,23 @@ class AttentionMaskLayer(base.Layer):
                mode='train'):
     super().__init__(n_in=1, n_out=1)
     self._total_kv_pooling = total_kv_pooling
-    self._max_len = max_inference_length
     self._n_raw_tokens_generated = n_raw_tokens_generated
+    self._max_len = max_inference_length
     self._mode = mode
 
   def forward(self, inputs):
-    x = inputs
-    return self.calculate_mask(x, x)
+    batch_size, queries_len, _ = inputs.shape
+    return self._funnel_mask(batch_size, queries_len)
 
-  def calculate_mask(self, queries, keys):
-    batch_size = queries.shape[0]
-    keys_len, queries_len = keys.shape[-2], queries.shape[-2]
-    funnel_factor, is_upsampling = calc_funnel_ratio(keys_len, queries_len)
-
-    return self._funnel_mask(batch_size, keys_len, queries_len, funnel_factor,
-                             is_upsampling)
-
-  def _funnel_mask(self, batch_size, keys_len, queries_len, funnel_factor,
-                   is_upsampling):
+  def _funnel_mask(self, batch_size, queries_len):
     """Creates a funnel mask.
 
     This function based on keys/queries lengths creates a triangle mask
     that prevents tokens from attending to positions following it.
 
-    If funnel_factor is not equal to 1 due to funnel upsampling or
-    downsampling it adjusts created mask for funnel attention
-    by repeating each element funnel_factor times.
-
-    This is because after funnel layer one token attends to funnel_factor
-    different tokens in downsampling. During upsampling on the other hand
-    funnel_factor tokens are attending to single token before upsampling.
-
     Args:
       batch_size: batch size.
-      keys_len: keys length.
       queries_len: queries length.
-      funnel_factor: funnel factor.
-      is_upsampling: upsampling if set to True.
 
     Returns:
       Funnel mask.
@@ -646,42 +560,10 @@ class AttentionMaskLayer(base.Layer):
       self.state += self._n_raw_tokens_generated
       return mask
 
-    if funnel_factor != 1:
-      if not is_upsampling:
-        mask = jnp.tril(jnp.ones((queries_len, queries_len), dtype=jnp.bool_))
-        mask = jnp.repeat(mask, funnel_factor, axis=-1)
-      else:
-        mask = jnp.tril(jnp.ones((keys_len, keys_len), dtype=jnp.bool_))
-        mask = jnp.repeat(mask, funnel_factor, axis=-2)
-    else:
-      mask = jnp.tril(jnp.ones((queries_len, queries_len), dtype=jnp.bool_))
-
+    mask = jnp.tril(jnp.ones((queries_len, queries_len), dtype=jnp.bool_))
     return jnp.repeat(mask[None, None, :, :], batch_size, axis=0)
 
   def init_weights_and_state(self, input_signature):
     """Initializes this layer for fast inference, if in ``'predict'`` mode."""
     if self._mode == 'predict':
       self.state = jnp.array(0)
-
-
-@assert_shape('...d->...d')
-def ShiftRightCls(cls_id):
-  """Shifts right.
-
-  Returns a layer that shifts input tokens to the right by one
-  and inserts an cls token to the beginning like in BERT paper.
-
-  Args:
-    cls_id: id of the cls token in embedding dictionary.
-  Returns:
-    shift_right layer.
-  """
-
-  def shift_right(x):
-    pad_widths = [(0, 0)] * len(x.shape)
-    pad_widths[1] = (1, 0)
-    padded = jnp.pad(
-        x, pad_widths, mode='constant', constant_values=x.dtype.type(cls_id))
-    return padded[:, :-1]
-
-  return cb.Fn('ShiftRightCls()', shift_right)
