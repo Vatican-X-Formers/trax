@@ -51,7 +51,33 @@ from trax.layers.attention import SplitIntoHeads
 # pylint: disable=invalid-name
 
 
-@assert_shape('bSq,blk,blv,b1xp->bSd,b1xp')
+def RelativeAttentionWrapper(
+        n_heads=1,
+        d_qk=64,
+        d_v=64,
+        causal=False,
+        masked=False,
+        output_dropout=0.0,
+        attention_dropout=0.0,
+        mode='train',
+        context_bias_layer=None,
+        location_bias_layer=None,
+        n_raw_tokens_generated=None,
+        max_inference_length=3072,
+        chunk_len=None,
+        chunk_offset=None):
+  # TODO: this will be attn_type for DecoderBlock
+  del d_v, causal, masked, output_dropout
+  return RelativeAttentionLMLayer(d_qk * n_heads, context_bias_layer,
+                                  location_bias_layer, total_kv_pooling=1,
+                                  n_heads=n_heads,
+                                  dropout=attention_dropout,
+                                  n_raw_tokens_generated=n_raw_tokens_generated,
+                                  max_inference_length=max_inference_length,
+                                  mode=mode)
+
+
+@assert_shape('bld,b1xp->bld,b1xp')
 def RelativeAttentionLayer(d_feature,
                            context_bias_layer,
                            location_bias_layer,
@@ -95,21 +121,21 @@ def RelativeAttentionLayer(d_feature,
         modes.
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
-
-  return cb.Serial(
-      cb.Branch(
-          PositionalEmbeddings(
+  pos_emb = PositionalEmbeddings(
               d_feature,
               separate_cls,
               total_kv_pooling,
               n_raw_tokens_generated=n_raw_tokens_generated,
               max_inference_length=max_inference_length,
-              mode=mode), cb.Select([0]), cb.Select([1])),
-      cb.Parallel(
+              mode=mode)
+
+  return cb.Serial(
+      cb.Branch(
+          cb.Serial(pos_emb, core.Dense(d_feature)),
           core.Dense(d_feature),
           core.Dense(d_feature),
           core.Dense(d_feature),
-          core.Dense(d_feature),
+          cb.Select([1])  # mask
       ),
       context_bias_layer,
       location_bias_layer,
@@ -125,7 +151,7 @@ def RelativeAttentionLayer(d_feature,
   )
 
 
-@assert_shape('bSq,blk,blv->bSd')
+@assert_shape('bld->bld')
 def RelativeAttentionLMLayer(d_feature,
                              context_bias_layer,
                              location_bias_layer,
@@ -173,11 +199,14 @@ def RelativeAttentionLMLayer(d_feature,
       mode=mode)
 
   return cb.Serial(
-      AttentionMaskLayer(
+      cb.Branch(
+        None,
+        AttentionMaskLayer(
           total_kv_pooling=total_kv_pooling,
           n_raw_tokens_generated=n_raw_tokens_generated,
           max_inference_length=max_inference_length,
           mode=mode),  # q, k, v, mask
+      ),
       attention,  # vecs, mask
       cb.Select([0], n_in=2),  # vecs
   )
@@ -419,7 +448,7 @@ class PositionalEmbeddings(base.Layer):
     self._mode = mode
 
   def forward(self, inputs):
-    queries, keys = inputs
+    queries = keys = inputs[0]
     positions = self.PositionsVectors(queries, keys)
     pos_emb = Sinusoidal_Embeddings(positions, self._d_feature)
     return pos_emb
@@ -563,15 +592,15 @@ class AttentionMaskLayer(base.Layer):
                n_raw_tokens_generated=1,
                max_inference_length=3072,
                mode='train'):
-    super().__init__(n_in=3, n_out=4)
+    super().__init__(n_in=1, n_out=1)
     self._total_kv_pooling = total_kv_pooling
     self._max_len = max_inference_length
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._mode = mode
 
   def forward(self, inputs):
-    q, k, v = inputs
-    return q, k, v, self.calculate_mask(q, k)
+    x = inputs
+    return self.calculate_mask(x, x)
 
   def calculate_mask(self, queries, keys):
     batch_size = queries.shape[0]
