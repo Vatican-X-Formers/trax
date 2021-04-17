@@ -513,13 +513,13 @@ class PositionalEmbeddings(base.Layer):
   def PositionsVectors(self, inputs):
     if self._mode == 'predict':
       cur_token = (self.state // self._total_kv_pooling) % self._chunk_len
-      positions = jnp.arange(0, self._max_len, 1.0) - cur_token
-      positions = positions
+      # if chunk_len is none then it is equal _max_len
+      positions = jnp.arange(0, self._chunk_len, 1.0) - cur_token
       self.state = self.state + self._n_raw_tokens_generated
       return positions
 
     inputs_len = inputs.shape[1]
-    positions = jnp.arange(-inputs_len + 1, inputs_len, 1.0)
+    positions = jnp.arange(inputs_len)
 
     return positions
 
