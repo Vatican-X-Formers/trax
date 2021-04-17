@@ -518,8 +518,10 @@ class PositionalEmbeddings(base.Layer):
       self.state = self.state + self._n_raw_tokens_generated
       return positions
 
-    inputs_len = inputs.shape[1]
-    positions = jnp.arange(inputs_len)
+    positions_seq_len = self._chunk_len \
+      if self._chunk_len is not None \
+      else inputs.shape[1]
+    positions = jnp.arange(positions_seq_len)
 
     return positions
 
