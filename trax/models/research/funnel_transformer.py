@@ -23,10 +23,9 @@ from trax import fastmath
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
-from trax.layers import core
-from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
-from trax.layers.research.rel_attention import RelativeAttentionLMLayer
+from trax.layers.research.rel_attention import RelativeAttentionLMLayer, \
+    _get_rel_att_inputs
 from trax.models.reformer.reformer import DecoderBlock
 from trax.models.research.configurable_transformer import PositionalEncoder
 from trax.models.transformer import _EncoderBlock
@@ -416,19 +415,6 @@ def FunnelTransformer(vocab_size,
       tl.LayerNorm(),
       tl.Dense(vocab_size),
   )
-
-
-def _get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
-  """Global relative attentions bias initialization shared across the layers."""
-  assert d_model % n_heads == 0 and d_model % 2 == 0
-  d_head = d_model // n_heads
-
-  bias_initializer = init.RandomNormalInitializer(1e-6)
-  context_bias_layer = core.Weights(bias_initializer,
-                                    shape=(1, n_heads, 1, d_head))
-  location_bias_layer = core.Weights(bias_initializer,
-                                     shape=(1, n_heads, 1, d_head))
-  return context_bias_layer, location_bias_layer
 
 
 def _RelativeDecoderBlock(d_model,

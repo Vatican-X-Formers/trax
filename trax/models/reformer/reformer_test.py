@@ -28,7 +28,7 @@ from trax import layers as tl
 from trax import shapes
 from trax.layers import test_utils, RelativeAttentionWrapper
 from trax.models.reformer import reformer
-from trax.models.research.funnel_transformer import _get_rel_att_inputs
+from trax.layers.research.rel_attention import _get_rel_att_inputs
 
 BACKENDS = [fastmath.Backend.JAX, fastmath.Backend.TFNP]
 

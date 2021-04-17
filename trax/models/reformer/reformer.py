@@ -26,7 +26,7 @@ from trax.models.research import transformer2 as t2
 
 # Layers are always CamelCase, but functions in general are snake_case
 # pylint: disable=invalid-name
-from trax.models.research.funnel_transformer import _get_rel_att_inputs
+from trax.layers.research.rel_attention import _get_rel_att_inputs
 
 
 def DecoderBlock(d_model, d_ff, d_attention_key, d_attention_value,
