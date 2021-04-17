@@ -2,8 +2,6 @@ import trax
 import gin
 import os
 from trax.models import FunnelTransformerLM
-import itertools
-
 
 """
 STEPS
@@ -28,7 +26,7 @@ FunnelTransformerLM.vocab_size = 256
 n_devices = 8
 total_batch_size = n_devices
 
-model = FunnelTransformerLM(
+cls_model = model = FunnelTransformerLM(
     d_ff = 256,
     d_model = 64,
     dropout = 0.04,
@@ -37,24 +35,18 @@ model = FunnelTransformerLM(
     n_heads = 1,
     shorten_factors = (3,),
     vanilla_layers = (1,1),
-    vocab_size = 256
+    vocab_size = 256,
+    n_classes=10
 )
 
-"""
-_, _ = model.init_from_file(
-        '/content/train_dir/model_10.pkl.gz',
-        weights_only=True,
-        #input_signature=trax.shapes.ShapeDtype((total_batch_size, 1), dtype=np.int32)
-)
-"""
 
 def vatican_stream():
     streams = trax.data.tf_inputs.data_streams(
         data_dir = None,
         dataset_name = 'cifar10',
         input_name = 'image',
-        target_name = 'image',
-        bare_preprocess_fn = trax.data.tf_inputs.downsampled_imagenet_flatten_bare_preprocess
+        target_name = 'label',
+        bare_preprocess_fn = trax.data.tf_inputs.downsampled_imagenet_flatten_bare_preprocess_gen
     )
 
     return trax.data.inputs.batcher(streams, variable_shapes=False,
@@ -71,16 +63,15 @@ reg_task = trax.supervised.training.TrainTask(
 )
 reg_eval_task = trax.supervised.training.EvalTask(
     labeled_data=eval_stream,
-    metrics=[trax.layers.WeightedCategoryCrossEntropy()]
+    metrics=[trax.layers.WeightedCategoryCrossEntropy(), trax.layers.Accuracy()]
 )
 
 training_session = trax.supervised.training.Loop(
-    model,
+    cls_model,
     tasks=[reg_task],
     eval_tasks=[reg_eval_task],
     eval_at=lambda step_n: step_n % 20 == 0,
-    output_dir='./'
 )
 
 
-training_session.run(n_steps=100)
+training_session.run(n_steps=100000)
