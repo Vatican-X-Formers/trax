@@ -119,8 +119,9 @@ def RelativeAttentionLayer(d_feature,
   pos_emb = PositionalEmbeddings(
       d_feature,
       total_kv_pooling,
-      n_raw_tokens_generated=n_raw_tokens_generated,
       max_inference_length=max_inference_length,
+      chunk_len=chunk_len,
+      n_raw_tokens_generated=n_raw_tokens_generated,
       mode=mode)
 
   attention = RelativeAttention(  # pylint: disable=no-value-for-parameter
@@ -173,7 +174,6 @@ def RelativeAttentionLMLayer(d_feature,
     location_bias_layer: Global location bias from Transformer XL's attention.
       There should be one such layer shared for all relative attention layers.
     total_kv_pooling: Accumulated pool size of keys/values used at this layer.
-    separate_cls: True/False if we separate_cls in calculations.
     n_heads: Number of attention heads.
     dropout: Probabilistic rate for internal dropout applied to attention
       activations (based on query-key pairs) before dotting them with values.
@@ -203,8 +203,9 @@ def RelativeAttentionLMLayer(d_feature,
 
   mask_layer = AttentionMaskLayer(
       total_kv_pooling=total_kv_pooling,
-      n_raw_tokens_generated=n_raw_tokens_generated,
       max_inference_length=max_inference_length,
+      chunk_len=chunk_len,
+      n_raw_tokens_generated=n_raw_tokens_generated,
       mode=mode)
 
   return cb.Serial(
@@ -393,8 +394,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
 
   def _calc_attn_scores(q, k):
     ac = jnp.einsum('bnid,bnjd->bnij', q + context_bias, k)
-    bd = jnp.einsum('bnid,jnd->bnij', q + location_bias,
-                    pos_emb[:2 * k.shape[2] - 1, ...])
+    bd = jnp.einsum('bnid,jnd->bnij', q + location_bias, pos_emb)
 
     if mode != 'predict':
       bd = _fast_matrix_shift(bd)
@@ -582,16 +582,22 @@ class AttentionMaskLayer(base.Layer):
 
   def __init__(self,
                total_kv_pooling=1,
-               n_raw_tokens_generated=1,
                max_inference_length=3072,
+               chunk_len=None,
+               n_raw_tokens_generated=1,
                mode='train'):
     super().__init__(n_in=1, n_out=1)
     self._total_kv_pooling = total_kv_pooling
-    self._n_raw_tokens_generated = n_raw_tokens_generated
     self._max_len = max_inference_length
+    self._chunk_len = chunk_len
+    self._n_raw_tokens_generated = n_raw_tokens_generated
     self._mode = mode
 
   def forward(self, inputs):
+    if self._chunk_len is not None:
+      return jnp.tril(jnp.ones((self._chunk_len, self._chunk_len),
+                               dtype=jnp.bool_))
+
     inputs_len = inputs.shape[1]
 
     if self._mode == 'predict':
