@@ -491,7 +491,6 @@ def _RelativeDecoderBlock(d_model,
   return [
       tl.Residual(               # vecs
           tl.LayerNorm(),
-          tl.Select([0, 0, 0]),
           attention,
           dropout_,
       ),                         # vecs
@@ -909,19 +908,7 @@ def RelformerLM(vocab_size,
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
-  def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
-    context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
-                                                                  n_heads)
-    decoder_blocks = [
-        # pylint: disable=g-complex-comprehension
-        _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
-                              dropout_shared_axes, mode, ff_activation,
-                              context_bias_layer, location_bias_layer,
-                              total_pooling, max_len) for _ in range(n_layers)
-    ]
-    return decoder_blocks + [tl.LayerNorm()]
-
-  def create_reformer_blocks(n_layers, dense=True):  # pylint: disable=invalid-name
+  def create_reformer_blocks(n_layers):  # pylint: disable=invalid-name
     if n_layers == 0:
       return [tl.LayerNorm()]
     d_per_head = d_model // n_heads
@@ -936,25 +923,13 @@ def RelformerLM(vocab_size,
                      mode=mode)
         for _ in range(n_layers)]
 
-    return [
-        tl.Dup(),
-        tl.ReversibleSerial(decoder_blocks),
-        tl.Concatenate(),
-        tl.LayerNorm(),
-        tl.Dense(d_model) if dense else [],
-    ]
+    return [tl.ReversibleSerial(decoder_blocks), tl.LayerNorm()]
 
-  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks, dense=True)
+  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks)
 
-  relative_decoder_blocks = create_decoder_blocks(n_rel_layers, shorten_factor)
+  relative_decoder_blocks = create_reformer_blocks(n_rel_layers)
 
-  conv_layer = tl.Serial(
-      tl.CausalConv(d_model, shorten_factor),
-      ff_activation()
-  )
-
-  post_decoder_blocks = create_reformer_blocks(n_post_decoder_blocks,
-                                               dense=False)
+  post_decoder_blocks = create_reformer_blocks(n_post_decoder_blocks)
 
   cacher = RelformerCacher(
       total_kv_pooling=shorten_factor,
@@ -968,35 +943,25 @@ def RelformerLM(vocab_size,
       n_raw_tokens_generated=n_raw_tokens_generated,
       mode=mode)
 
-  cacher_conv = RelformerCacher(
-      total_kv_pooling=shorten_factor,
-      n_raw_tokens_generated=n_raw_tokens_generated,
-      max_inference_length=max_len,
-      shift=shorten_factor - 1,
-      sliding=True,
-      mode=mode)
-
-  picker_conv = PickLastTokenInPredict(mode=mode)
-
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,  # vecs
       positional_encoder,
-      pre_decoder_blocks,  # vecs
       tl.Dup(),
+      pre_decoder_blocks,  # vecs
       cacher,
       tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
       _DownsamplerLM(shorten_factor, d_model),
+      tl.Dup(),
       relative_decoder_blocks,
+      tl.Concatenate(),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       _UpsamplerLM(shorten_factor, d_model),
       tl.LayerNorm(),
       picker,
-      tl.Concatenate(),
-      cacher_conv,
-      conv_layer,
-      picker_conv,
       post_decoder_blocks,
+      tl.Concatenate(),
+      tl.LayerNorm(),
       tl.Dense(vocab_size),  # vecs
   )
