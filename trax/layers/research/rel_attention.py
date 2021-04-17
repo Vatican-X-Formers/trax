@@ -47,6 +47,7 @@ from trax.layers.assert_shape import assert_shape
 from trax.layers.attention import MergeHeads
 from trax.layers.attention import SplitIntoHeads
 
+
 # Layers are always CamelCase, but functions in general are snake_case
 # pylint: disable=invalid-name
 
@@ -121,14 +122,14 @@ def RelativeAttentionLayer(d_feature,
       mode=mode)
 
   attention = RelativeAttention(  # pylint: disable=no-value-for-parameter
-          total_kv_pooling=total_kv_pooling,
-          n_heads=n_heads,
-          dropout=dropout,
-          n_raw_tokens_generated=n_raw_tokens_generated,
-          max_inference_length=max_inference_length,
-          chunk_len=chunk_len,
-          chunk_offset=chunk_offset,
-          mode=mode),
+      total_kv_pooling=total_kv_pooling,
+      n_heads=n_heads,
+      dropout=dropout,
+      n_raw_tokens_generated=n_raw_tokens_generated,
+      max_inference_length=max_inference_length,
+      chunk_len=chunk_len,
+      chunk_offset=chunk_offset,
+      mode=mode),
 
   return cb.Serial(
       cb.Branch(
@@ -201,15 +202,15 @@ def RelativeAttentionLMLayer(d_feature,
       mode=mode)
 
   mask_layer = AttentionMaskLayer(
-          total_kv_pooling=total_kv_pooling,
-          n_raw_tokens_generated=n_raw_tokens_generated,
-          max_inference_length=max_inference_length,
-          mode=mode)
+      total_kv_pooling=total_kv_pooling,
+      n_raw_tokens_generated=n_raw_tokens_generated,
+      max_inference_length=max_inference_length,
+      mode=mode)
 
   return cb.Serial(
       cb.Branch(
-        None,
-        mask_layer,  # q, k, v, mask
+          None,
+          mask_layer,  # q, k, v, mask
       ),
       attention,  # vecs, mask
       cb.Select([0], n_in=2),  # vecs
@@ -549,27 +550,15 @@ def Sinusoidal_Embeddings(positions, d_feature):
   return pos_emb
 
 
-def _fast_matrix_shift(x, shift=1):
-  """Fast matrix shift.
-
-  Implements necessary shift for relative positional attention calculations.
-
-  Args:
-    x: matrix.
-    shift: i-th row is shifted by i * shift elements to the left
-
-  Returns:
-    Shifted matrix x.
-  """
+def _fast_matrix_shift(x):
+  # Implements necessary shift for relative positional attention calculations.
+  shift = 1
   batch_size, n_head = x.shape[0], x.shape[1]
-  queries_len, keys_len = x.shape[2], (x.shape[3] + 1) // 2
-
+  queries_len, keys_len = x.shape[2], x.shape[3]
   zero_pad = jnp.zeros((batch_size, n_head, queries_len, shift))
   x = jnp.concatenate([zero_pad, x], axis=3)
-  x = x.reshape(batch_size, n_head, 2 * keys_len - 1 + shift, queries_len)
+  x = x.reshape(batch_size, n_head, keys_len + shift, queries_len)
   x = x[:, :, shift:, :]
-  x = x.reshape(batch_size, n_head, queries_len, keys_len * 2 - 1)
-  x = x[:, :, :, shift - 1:shift - 1 + keys_len]
   return x
 
 
