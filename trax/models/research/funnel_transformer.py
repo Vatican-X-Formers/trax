@@ -838,6 +838,7 @@ def RelformerLM(vocab_size,
                 shorten_factor=3,
                 n_rel_layers=6,
                 rel_chunk_len=None,
+                vanilla_chunk_len=None,
                 n_heads=8,
                 dropout=0.1,
                 dropout_shared_axes=None,
@@ -875,6 +876,10 @@ def RelformerLM(vocab_size,
     shorten_factor: by how much to shorten
     n_rel_layers: number of Transformer blocks after the pooling. These blocks
         use relative attention.
+    rel_chunk_len (optional): Number of tokens per chunk. Setting this option
+        will enable chunked relative attention.
+    vanilla_chunk_len (optional): Enables chunked relative attention also in
+        layers before and after shortening.
     n_heads: Number of attention heads.
     dropout: Stochastic rate (probability) for dropping an activation value
         when applying dropout within an encoder block.
@@ -912,34 +917,35 @@ def RelformerLM(vocab_size,
   context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
                                                                 n_heads)
 
-  def create_reformer_blocks(n_layers, total_kv_pooling=1, use_rel_attn=False,
+  def create_reformer_blocks(n_layers, total_kv_pooling=1,
+                             layer_chunk_len=None,
                              dense=True):  # pylint: disable=invalid-name
     if n_layers == 0:
       return [tl.LayerNorm()]
 
-    def determine_attn_type(rel_chunk_offset):
-      if use_rel_attn:
-        return functools.partial(RelativeAttentionWrapper,
-                                 context_bias_layer=context_bias_layer,
-                                 location_bias_layer=location_bias_layer,
-                                 n_raw_tokens_generated=n_raw_tokens_generated,
-                                 max_inference_length=max_len,
-                                 total_kv_pooling=total_kv_pooling,
-                                 chunk_len=rel_chunk_len,
-                                 chunk_offset=rel_chunk_offset)
-      else:
+    def determine_attn_type(layer_number):
+      if layer_chunk_len is None:
         return vanilla_attn_type
+
+      chunk_offset = layer_chunk_len // 2 if layer_number % 2 == 0 else 0
+      return functools.partial(RelativeAttentionWrapper,
+                               context_bias_layer=context_bias_layer,
+                               location_bias_layer=location_bias_layer,
+                               n_raw_tokens_generated=n_raw_tokens_generated,
+                               max_inference_length=max_len,
+                               total_kv_pooling=total_kv_pooling,
+                               chunk_len=layer_chunk_len,
+                               chunk_offset=chunk_offset)
 
     d_per_head = d_model // n_heads
 
     decoder_blocks = []
     for i in range(n_layers):
-      chunk_offset = rel_chunk_len // 2 if i % 2 == 0 else 0
-      attn_type = determine_attn_type(chunk_offset)
+      layer_attn_type = determine_attn_type(i)
 
       decoder_blocks.append(
           DecoderBlock(d_model, d_ff, d_per_head, d_per_head, n_heads,
-                       attn_type,
+                       layer_attn_type,
                        dropout, ff_activation, dropout,
                        ff_use_sru=0,
                        ff_chunk_size=0,
@@ -955,18 +961,20 @@ def RelformerLM(vocab_size,
         tl.Dense(d_model) if dense else [],
     ]
 
-  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks)
+  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks,
+                                              layer_chunk_len=vanilla_chunk_len)
 
   relative_decoder_blocks = create_reformer_blocks(
-      n_rel_layers, total_kv_pooling=shorten_factor, use_rel_attn=True)
+      n_rel_layers, total_kv_pooling=shorten_factor,
+      layer_chunk_len=rel_chunk_len)
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, shorten_factor),
       ff_activation()
   )
 
-  post_decoder_blocks = create_reformer_blocks(n_post_decoder_blocks,
-                                               dense=False)
+  post_decoder_blocks = create_reformer_blocks(
+      n_post_decoder_blocks, layer_chunk_len=vanilla_chunk_len, dense=False)
 
   cacher = RelformerCacher(
       total_kv_pooling=shorten_factor,
