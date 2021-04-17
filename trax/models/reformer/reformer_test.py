@@ -28,7 +28,7 @@ from trax import layers as tl
 from trax import shapes
 from trax.layers import test_utils, RelativeAttentionWrapper
 from trax.models.reformer import reformer
-from trax.layers.research.rel_attention import _get_rel_att_inputs
+from trax.layers.research.rel_attention import get_rel_att_inputs
 
 BACKENDS = [fastmath.Backend.JAX, fastmath.Backend.TFNP]
 
@@ -75,7 +75,7 @@ class ReformerTest(parameterized.TestCase):
     d_model = 32
     n_heads = 2
 
-    context_bias, location_bias = _get_rel_att_inputs(d_model, n_heads)
+    context_bias, location_bias = get_rel_att_inputs(d_model, n_heads)
 
     rel_wrapper = functools.partial(RelativeAttentionWrapper,
                                     context_bias_layer=context_bias,

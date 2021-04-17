@@ -25,7 +25,7 @@ from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer, \
-    _get_rel_att_inputs
+    get_rel_att_inputs
 from trax.models.reformer.reformer import DecoderBlock
 from trax.models.research.configurable_transformer import PositionalEncoder
 from trax.models.transformer import _EncoderBlock
@@ -634,8 +634,8 @@ def FunnelTransformerLM(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
-  context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
-                                                                n_heads)
+  context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model,
+                                                               n_heads)
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
@@ -896,8 +896,8 @@ def RelformerLM(vocab_size,
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
   def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
-    context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
-                                                                  n_heads)
+    context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model,
+                                                                 n_heads)
     decoder_blocks = [
         # pylint: disable=g-complex-comprehension
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,

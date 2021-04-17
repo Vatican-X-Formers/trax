@@ -26,7 +26,7 @@ from trax.models.research import transformer2 as t2
 
 # Layers are always CamelCase, but functions in general are snake_case
 # pylint: disable=invalid-name
-from trax.layers.research.rel_attention import _get_rel_att_inputs
+from trax.layers.research.rel_attention import get_rel_att_inputs
 
 
 def DecoderBlock(d_model, d_ff, d_attention_key, d_attention_value,
@@ -152,7 +152,7 @@ def ReformerLM(vocab_size,
 
   decoder_blocks = []
 
-  context_bias, location_bias = _get_rel_att_inputs(d_model, n_heads)
+  context_bias, location_bias = get_rel_att_inputs(d_model, n_heads)
 
   rel_wrapper = functools.partial(RelativeAttentionWrapper,
                                   context_bias_layer=context_bias,

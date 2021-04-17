@@ -687,7 +687,7 @@ def ShiftRightCls(cls_id):
   return cb.Fn('ShiftRightCls()', shift_right)
 
 
-def _get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
+def get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
   """Global relative attentions bias initialization shared across the layers."""
   assert d_model % n_heads == 0 and d_model % 2 == 0
   d_head = d_model // n_heads
