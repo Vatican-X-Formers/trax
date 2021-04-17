@@ -82,7 +82,7 @@ def RelativeAttentionWrapper(
                                   mode=mode)
 
 
-# @assert_shape('bld,...->bld,...')
+@assert_shape('bld,...->bld,...')
 def RelativeAttentionLayer(d_feature,
                            context_bias_layer,
                            location_bias_layer,
