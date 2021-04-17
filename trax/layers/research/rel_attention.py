@@ -508,27 +508,30 @@ class PositionalEmbeddings(base.Layer):
     self._d_feature = d_feature
     self._total_kv_pooling = total_kv_pooling
     self._max_len = max_inference_length
-    self._chunk_len = chunk_len if chunk_len is not None else self._max_len
+    self._chunk_len = chunk_len
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._mode = mode
 
   def forward(self, inputs):
-    positions = self.PositionsVectors(inputs)
+    positions = self.PositionsVectors(inputs.shape[1])
     pos_emb = Sinusoidal_Embeddings(positions, self._d_feature)
     return pos_emb
 
-  def PositionsVectors(self, inputs):
+  def PositionsVectors(self, n_tokens):
     if self._mode == 'predict':
-      cur_token = (self.state // self._total_kv_pooling) % self._chunk_len
-      # if chunk_len is none then it is equal _max_len
-      positions = jnp.arange(0, self._chunk_len, 1.0) - cur_token
+      if self._chunk_len is not None:
+        cur_token = (self.state // self._total_kv_pooling) % self._chunk_len
+        pos_seq_len = self._chunk_len
+      else:
+        cur_token = self.state // self._total_kv_pooling
+        pos_seq_len = self._max_len
+
+      positions = jnp.arange(0, pos_seq_len, 1.0) - cur_token
       self.state = self.state + self._n_raw_tokens_generated
       return positions
 
-    positions_seq_len = self._chunk_len \
-      if self._chunk_len is not None \
-      else inputs.shape[1]
-    positions = jnp.arange(positions_seq_len)
+    pos_seq_len = self._chunk_len if self._chunk_len is not None else n_tokens
+    positions = jnp.arange(pos_seq_len)
 
     return positions
 
@@ -541,7 +544,7 @@ class PositionalEmbeddings(base.Layer):
 def Sinusoidal_Embeddings(positions, d_feature):
   """Sinusoidal Embeddings.
 
-    Computes out of 1-D integer absolute position vector the sinusoidal
+  Computes out of 1-D integer absolute position vector the sinusoidal
   embeddings defined like in paper Attention is all you need (2017).
   Embeddings are shaped (positions, d_feature).
 
@@ -616,8 +619,7 @@ class AttentionMaskLayer(base.Layer):
       self.state += self._n_raw_tokens_generated
       return mask
 
-    mask = jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
-    return mask
+    return jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
 
   def init_weights_and_state(self, input_signature):
     """Initializes this layer for fast inference, if in ``'predict'`` mode."""
