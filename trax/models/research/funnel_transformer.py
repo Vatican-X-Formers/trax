@@ -23,8 +23,7 @@ from trax import fastmath
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
-from trax.layers import core
-from trax.layers import initializers as init
+from trax.layers import get_rel_att_inputs
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer
 from trax.models.reformer.reformer import DecoderBlock
@@ -418,19 +417,6 @@ def FunnelTransformer(vocab_size,
   )
 
 
-def _get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
-  """Global relative attentions bias initialization shared across the layers."""
-  assert d_model % n_heads == 0 and d_model % 2 == 0
-  d_head = d_model // n_heads
-
-  bias_initializer = init.RandomNormalInitializer(1e-6)
-  context_bias_layer = core.Weights(bias_initializer,
-                                    shape=(1, n_heads, 1, d_head))
-  location_bias_layer = core.Weights(bias_initializer,
-                                     shape=(1, n_heads, 1, d_head))
-  return context_bias_layer, location_bias_layer
-
-
 def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
                           mode, ff_activation, context_bias_layer,
                           location_bias_layer, total_pooling, i,
@@ -644,8 +630,8 @@ def FunnelTransformerLM(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
-  context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
-                                                                n_heads)
+  context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model,
+                                                               n_heads)
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
@@ -907,8 +893,8 @@ def RelformerLM(vocab_size,
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
   def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
-    context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
-                                                                  n_heads)
+    context_bias_layer, location_bias_layer = get_rel_att_inputs(d_model,
+                                                                 n_heads)
     decoder_blocks = [
         # pylint: disable=g-complex-comprehension
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,

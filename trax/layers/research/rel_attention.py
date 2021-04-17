@@ -40,7 +40,7 @@ Funnel Transformer model from:
 
 from trax import fastmath
 from trax.fastmath import numpy as jnp
-from trax.layers import base
+from trax.layers import base, initializers as init, core
 from trax.layers import combinators as cb
 from trax.layers import core
 from trax.layers.assert_shape import assert_shape
@@ -65,7 +65,7 @@ def RelativeAttentionWrapper(
         n_raw_tokens_generated=None,
         max_inference_length=3072,
         chunk_len=128,
-        chunk_offset=64):
+        chunk_offset=0):
   # TODO: this will be attn_type for DecoderBlock
   del d_v, causal, masked, output_dropout
   return RelativeAttentionLMLayer(d_qk * n_heads, context_bias_layer,
@@ -752,3 +752,16 @@ def ShiftRightCls(cls_id):
     return padded[:, :-1]
 
   return cb.Fn('ShiftRightCls()', shift_right)
+
+
+def get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
+  """Global relative attentions bias initialization shared across the layers."""
+  assert d_model % n_heads == 0 and d_model % 2 == 0
+  d_head = d_model // n_heads
+
+  bias_initializer = init.RandomNormalInitializer(1e-6)
+  context_bias_layer = core.Weights(bias_initializer,
+                                    shape=(1, n_heads, 1, d_head))
+  location_bias_layer = core.Weights(bias_initializer,
+                                     shape=(1, n_heads, 1, d_head))
+  return context_bias_layer, location_bias_layer

@@ -26,9 +26,8 @@ import numpy as np
 from trax import fastmath
 from trax import layers as tl
 from trax import shapes
-from trax.layers import test_utils, RelativeAttentionWrapper
+from trax.layers import test_utils, RelativeAttentionWrapper, get_rel_att_inputs
 from trax.models.reformer import reformer
-from trax.models.research.funnel_transformer import _get_rel_att_inputs
 
 BACKENDS = [fastmath.Backend.JAX, fastmath.Backend.TFNP]
 
@@ -75,7 +74,7 @@ class ReformerTest(parameterized.TestCase):
     d_model = 32
     n_heads = 2
 
-    context_bias, location_bias = _get_rel_att_inputs(d_model, n_heads)
+    context_bias, location_bias = get_rel_att_inputs(d_model, n_heads)
 
     rel_wrapper = functools.partial(RelativeAttentionWrapper,
                                     context_bias_layer=context_bias,
@@ -83,13 +82,13 @@ class ReformerTest(parameterized.TestCase):
 
     model = reformer.ReformerLM(
         vocab_size, d_model=d_model, d_ff=64, d_attention_key=16,
-        d_attention_value=16, n_layers=1, n_heads=n_heads, max_len=16,
+        d_attention_value=16, n_layers=1, n_heads=n_heads, max_len=128,
         attention_type=rel_wrapper)
-    xs = [np.ones((1, 8)).astype(np.int32),
-          np.ones((1, 8)).astype(np.int32)]
+    xs = [np.ones((1, 128)).astype(np.int32),
+          np.ones((1, 128)).astype(np.int32)]
     _, _ = model.init(shapes.signature(xs))
     ys = model(xs)
-    self.assertEqual([y.shape for y in ys], [(1, 8, 16), (1, 8)])
+    self.assertEqual([y.shape for y in ys], [(1, 128, 16), (1, 128)])
 
 
   def test_reformer_lm_lsh(self):
