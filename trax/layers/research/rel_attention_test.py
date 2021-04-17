@@ -54,7 +54,7 @@ class RelAttentionTest(absltest.TestCase):
                     [-3., -2., -1., 0., 1., 2., 3.],
                     [-3., -2., -1., 0., 1., 2., 3.]]]]).astype(np.float32)
 
-    y = layer(x, shift=1)
+    y = layer(x)
     self.assertEqual(y.dtype, np.float32)
     self.assertEqual(tl.to_list(y), [[[[0., 1., 2., 3.],
                                        [-1., 0., 1., 2.],

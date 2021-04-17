@@ -120,7 +120,11 @@ def RelativeAttentionLayer(d_feature,
     n_raw_tokens_generated: Number of tokens generated in a single pass through
       this layer. Used only in 'predict' non-training mode.
     max_inference_length: Maximum sequence length allowed in non-training
-        modes.
+      modes.
+    chunk_len (optional): Number of tokens per chunk. Setting this option will
+      enable chunked attention.
+    chunk_offset (optional): Offset for shifting chunks, for shifted chunked
+      attention
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
   pos_emb = PositionalEmbeddings(
@@ -188,7 +192,11 @@ def RelativeAttentionLMLayer(d_feature,
     n_raw_tokens_generated: Number of tokens generated in a single pass through
       this layer. Used only in 'predict' non-training mode.
     max_inference_length: Maximum sequence length allowed in non-training
-        modes.
+      modes.
+    chunk_len (optional): Number of tokens per chunk. Setting this option will
+      enable chunked attention.
+    chunk_offset (optional): Offset for shifting chunks, for shifted chunked
+      attention
     mode: One of `'train'`, `'eval'`, or `'predict'`.
   """
 
