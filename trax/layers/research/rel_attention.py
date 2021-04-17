@@ -53,24 +53,26 @@ from trax.layers.attention import SplitIntoHeads
 
 
 def RelativeAttentionWrapper(
-    n_heads=1,
-    d_qk=64,
-    d_v=64,
-    causal=False,
-    masked=False,
-    output_dropout=0.0,
-    attention_dropout=0.0,
-    mode='train',
-    context_bias_layer=None,
-    location_bias_layer=None,
-    n_raw_tokens_generated=None,
-    max_inference_length=3072,
-    chunk_len=None,
-    chunk_offset=None):
+        n_heads=1,
+        d_qk=64,
+        d_v=64,
+        causal=False,
+        masked=False,
+        output_dropout=0.0,
+        attention_dropout=0.0,
+        mode='train',
+        context_bias_layer=None,
+        location_bias_layer=None,
+        n_raw_tokens_generated=None,
+        max_inference_length=3072,
+        total_kv_pooling=1,
+        chunk_len=128,
+        chunk_offset=64):
   # TODO: this will be attn_type for DecoderBlock
   del d_v, causal, masked, output_dropout
   return RelativeAttentionLMLayer(d_qk * n_heads, context_bias_layer,
-                                  location_bias_layer, total_kv_pooling=1,
+                                  location_bias_layer,
+                                  total_kv_pooling=total_kv_pooling,
                                   n_heads=n_heads,
                                   dropout=attention_dropout,
                                   n_raw_tokens_generated=n_raw_tokens_generated,

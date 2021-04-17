@@ -19,6 +19,8 @@
 Funnel-Transformer: Filtering out Sequential Redundancy for Efficient
 Language Processing https://arxiv.org/abs/2006.03236
 """
+import functools
+
 from trax import fastmath
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
@@ -26,7 +28,8 @@ from trax.fastmath.ops import index_add
 from trax.layers import core
 from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
-from trax.layers.research.rel_attention import RelativeAttentionLMLayer
+from trax.layers.research.rel_attention import RelativeAttentionLMLayer, \
+  RelativeAttentionWrapper
 from trax.models.reformer.reformer import DecoderBlock
 from trax.models.research.configurable_transformer import PositionalEncoder
 from trax.models.transformer import _EncoderBlock
@@ -906,36 +909,43 @@ def RelformerLM(vocab_size,
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
-  def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
-    context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
-                                                                  n_heads)
-    decoder_blocks = [
-        # pylint: disable=g-complex-comprehension
-        _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
-                              dropout_shared_axes, mode, ff_activation,
-                              context_bias_layer, location_bias_layer,
-                              total_pooling, max_len,
-                              rel_chunk_len=rel_chunk_len,
-                              chunk_offset=(rel_chunk_len // 2) * (
-                                  i % 2) if rel_chunk_len else None) for i in
-        range(n_layers)
-    ]
-    return decoder_blocks + [tl.LayerNorm()]
+  context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
+                                                                n_heads)
 
-  def create_reformer_blocks(n_layers, dense=True):  # pylint: disable=invalid-name
+  def create_reformer_blocks(n_layers, total_kv_pooling=1, use_rel_attn=False,
+                             dense=True):  # pylint: disable=invalid-name
     if n_layers == 0:
       return [tl.LayerNorm()]
+
+    def determine_attn_type(rel_chunk_offset):
+      if use_rel_attn:
+        return functools.partial(RelativeAttentionWrapper,
+                                 context_bias_layer=context_bias_layer,
+                                 location_bias_layer=location_bias_layer,
+                                 n_raw_tokens_generated=n_raw_tokens_generated,
+                                 max_inference_length=max_len,
+                                 total_kv_pooling=total_kv_pooling,
+                                 chunk_len=rel_chunk_len,
+                                 chunk_offset=rel_chunk_offset)
+      else:
+        return vanilla_attn_type
+
     d_per_head = d_model // n_heads
-    decoder_blocks = [
-        DecoderBlock(d_model, d_ff, d_per_head, d_per_head, n_heads,  # pylint: disable=g-complex-comprehension
-                     vanilla_attn_type,
-                     dropout, ff_activation, dropout,
-                     ff_use_sru=0,
-                     ff_chunk_size=0,
-                     ff_sparsity=0,
-                     attention_chunk_size=0,
-                     mode=mode)
-        for _ in range(n_layers)]
+
+    decoder_blocks = []
+    for i in range(n_layers):
+      chunk_offset = rel_chunk_len // 2 if i % 2 == 0 else 0
+      attn_type = determine_attn_type(chunk_offset)
+
+      decoder_blocks.append(
+          DecoderBlock(d_model, d_ff, d_per_head, d_per_head, n_heads,
+                       attn_type,
+                       dropout, ff_activation, dropout,
+                       ff_use_sru=0,
+                       ff_chunk_size=0,
+                       ff_sparsity=0,
+                       attention_chunk_size=0,
+                       mode=mode))
 
     return [
         tl.Dup(),
@@ -945,9 +955,10 @@ def RelformerLM(vocab_size,
         tl.Dense(d_model) if dense else [],
     ]
 
-  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks, dense=True)
+  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks)
 
-  relative_decoder_blocks = create_decoder_blocks(n_rel_layers, shorten_factor)
+  relative_decoder_blocks = create_reformer_blocks(
+      n_rel_layers, total_kv_pooling=shorten_factor, use_rel_attn=True)
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, shorten_factor),
