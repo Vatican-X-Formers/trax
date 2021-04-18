@@ -43,6 +43,7 @@ from trax.fastmath import numpy as jnp
 from trax.layers import base
 from trax.layers import combinators as cb
 from trax.layers import core
+from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.attention import MergeHeads
 from trax.layers.attention import SplitIntoHeads
@@ -53,25 +54,21 @@ from trax.layers.attention import SplitIntoHeads
 
 
 def RelativeAttentionWrapper(
-        n_heads=1,
-        d_qk=64,
-        d_v=64,
-        causal=False,
-        masked=False,
-        output_dropout=0.0,
-        attention_dropout=0.0,
-        mode='train',
-        context_bias_layer=None,
-        location_bias_layer=None,
-        n_raw_tokens_generated=None,
-        max_inference_length=3072,
-        total_kv_pooling=1,
-        chunk_len=None,
-        chunk_offset=None):
+    n_heads=1,
+    d_qk=64,
+    d_v=64,
+    causal=False,
+    masked=False,
+    output_dropout=0.0,
+    attention_dropout=0.0,
+    mode='train',
+    n_raw_tokens_generated=None,
+    max_inference_length=3072,
+    total_kv_pooling=1,
+    chunk_len=None,
+    chunk_offset=None):
   del d_v, causal, masked, output_dropout
   return RelativeAttentionLMLayer(d_feature=d_qk * n_heads,
-                                  context_bias_layer=context_bias_layer,
-                                  location_bias_layer=location_bias_layer,
                                   total_kv_pooling=total_kv_pooling,
                                   n_heads=n_heads,
                                   dropout=attention_dropout,
@@ -84,8 +81,6 @@ def RelativeAttentionWrapper(
 
 @assert_shape('bld,...->bld,...')
 def RelativeAttentionLayer(d_feature,
-                           context_bias_layer,
-                           location_bias_layer,
                            total_kv_pooling,
                            n_heads=1,
                            dropout=0.0,
@@ -98,10 +93,6 @@ def RelativeAttentionLayer(d_feature,
 
   Args:
     d_feature: Depth/dimensionality of feature embedding.
-    context_bias_layer: Global context bias from Transformer XL's attention.
-      There should be one such layer shared for all relative attention layers.
-    location_bias_layer: Global location bias from Transformer XL's attention.
-      There should be one such layer shared for all relative attention layers.
     total_kv_pooling: Accumulated pool size of keys/values used at this layer.
     n_heads: Number of attention heads.
     dropout: Probabilistic rate for internal dropout applied to attention
@@ -135,6 +126,13 @@ def RelativeAttentionLayer(d_feature,
       chunk_offset=chunk_offset,
       mode=mode),
 
+  assert d_feature % n_heads == 0
+  d_head = d_feature // n_heads
+  context_bias_layer = core.Weights(init.RandomNormalInitializer(1e-6),
+                                    shape=(1, n_heads, 1, d_head))
+  location_bias_layer = core.Weights(init.RandomNormalInitializer(1e-6),
+                                     shape=(1, n_heads, 1, d_head))
+
   return cb.Serial(
       cb.Branch(
           cb.Serial(pos_emb, core.Dense(d_feature)),
@@ -152,8 +150,6 @@ def RelativeAttentionLayer(d_feature,
 
 @assert_shape('bld->bld')
 def RelativeAttentionLMLayer(d_feature,
-                             context_bias_layer,
-                             location_bias_layer,
                              total_kv_pooling,
                              n_heads=1,
                              dropout=0.0,
@@ -170,10 +166,6 @@ def RelativeAttentionLMLayer(d_feature,
 
   Args:
     d_feature: Depth/dimensionality of feature embedding.
-    context_bias_layer: Global context bias from Transformer XL's attention.
-      There should be one such layer shared for all relative attention layers.
-    location_bias_layer: Global location bias from Transformer XL's attention.
-      There should be one such layer shared for all relative attention layers.
     total_kv_pooling: Accumulated pool size of keys/values used at this layer.
     n_heads: Number of attention heads.
     dropout: Probabilistic rate for internal dropout applied to attention
@@ -191,8 +183,6 @@ def RelativeAttentionLMLayer(d_feature,
 
   attention = RelativeAttentionLayer(
       d_feature,
-      context_bias_layer,
-      location_bias_layer,
       total_kv_pooling,
       n_heads=n_heads,
       dropout=dropout,
@@ -213,10 +203,10 @@ def RelativeAttentionLMLayer(d_feature,
   return cb.Serial(
       cb.Branch(
           None,
-          mask_layer,           # vecs, mask
+          mask_layer,  # vecs, mask
       ),
-      attention,                # vecs, mask
-      cb.Select([0], n_in=2),   # vecs
+      attention,  # vecs, mask
+      cb.Select([0], n_in=2),  # vecs
   )
 
 
@@ -577,7 +567,7 @@ class PositionalEmbeddings(base.Layer):
       return positions
 
     sequence_length = self._chunk_len if self._chunk_len is not None else n_tokens
-    offset = sequence_length - 1   # offset to be compatible with predict mode
+    offset = sequence_length - 1  # offset to be compatible with predict mode
     positions = jnp.arange(sequence_length) - offset
 
     return positions
