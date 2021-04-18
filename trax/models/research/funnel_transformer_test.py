@@ -254,7 +254,7 @@ class FunnelTransformerTest(parameterized.TestCase):
     attention_type = tl.SelfAttention
 
     shorten_factor = 3
-    n_rel_layers = 1
+    n_rel_layers = 2
     vanilla_layers = (1, 1)
     n_heads = 2
 
@@ -291,6 +291,7 @@ class FunnelTransformerTest(parameterized.TestCase):
     input = np.concatenate(
         [np.zeros((batch_size, 1)).astype(np.int32), input], axis=1)
     input = input[:, :-1]
+
     _, _ = predict_funnel.init(shapes.signature(input[:, 0:1]),
                                rng=jax.random.PRNGKey(0), use_cache=False)
 
