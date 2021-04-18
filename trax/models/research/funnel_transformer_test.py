@@ -203,25 +203,37 @@ class FunnelTransformerTest(parameterized.TestCase):
 
   def test_funnel_transformer_lm_forward_shape_predict(self):
     d_model = 8
-    vocab_size = 7
+    vocab_size = 4
     batch_size = 1
+    n_len_eval = 42
+    attention_type = tl.SelfAttention
+
+    shorten_factor = 3
+    n_rel_layers = 2
+    vanilla_layers = (1, 1)
+    n_heads = 2
+
+    rel_chunk_len, vanilla_chunk_len = 2, 6
+
     x = np.ones((batch_size, 1)).astype(np.int32)
     gin.bind_parameter('trax.layers.SelfAttention.chunk_len', 20)
-    simple_funnel = ft.RelformerLM(
+
+    predict_funnel = ft.RelformerLM(
         vocab_size,
-        shorten_factor=3,
-        n_rel_layers=1,
-        vanilla_layers=(1, 1),
-        d_model=d_model,
-        d_ff=d_model,
-        n_heads=2,
-        vanilla_attn_type=tl.SelfAttention,
+        shorten_factor=shorten_factor,
+        n_rel_layers=n_rel_layers,
+        vanilla_layers=vanilla_layers,
+        d_model=d_model, d_ff=d_model, n_heads=n_heads,
+        vanilla_attn_type=attention_type,
+        rel_chunk_len=rel_chunk_len,
+        vanilla_chunk_len=vanilla_chunk_len,
+        max_len=n_len_eval,
         mode='predict')
 
-    _, _ = simple_funnel.init(shapes.signature(x))
+    _, _ = predict_funnel.init(shapes.signature(x))
 
     for _ in range(5):
-      y = simple_funnel(x)
+      y = predict_funnel(x)
       self.assertEqual(y.shape, (batch_size, 1, vocab_size))
     gin.clear_config()
 
