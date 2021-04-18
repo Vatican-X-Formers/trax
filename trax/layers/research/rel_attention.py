@@ -421,20 +421,25 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     out = jnp.matmul(chunked_dots, values)
   else:
     assert original_l % chunk_len == 0 and original_l >= chunk_len
-    n_chunks = original_l // chunk_len
 
     def chunk_split(v):
+      total_len = v.shape[2]
+      assert total_len % chunk_len == 0
+      n_chunks = total_len // chunk_len
+
       chunked_shape = (batch_size, n_heads, n_chunks, chunk_len, d_feature)
       v = jnp.reshape(v, chunked_shape)
       v = v.swapaxes(1, 2)
       return jnp.reshape(v,
                          (batch_size * n_chunks, n_heads, chunk_len, d_feature))
 
-    def chunk_join(v):
+    def chunk_join(v, total_len=original_l):
+      assert total_len % chunk_len == 0
+      n_chunks = total_len // chunk_len
       swapped_shape = (batch_size, n_chunks, n_heads, chunk_len, d_feature)
       v = jnp.reshape(v, swapped_shape)
       v = v.swapaxes(1, 2)
-      return jnp.reshape(v, (batch_size, n_heads, original_l, d_feature))
+      return jnp.reshape(v, (batch_size, n_heads, total_len, d_feature))
 
     if chunk_offset == 0:
       queries, keys, values = map(chunk_split, [queries, keys, values])
@@ -443,7 +448,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
       out = chunk_join(chunked_result)
     else:
       assert chunk_len > chunk_offset
-      post_len = chunk_len - chunk_offset
+      last_chunk_len = chunk_len - chunk_offset
 
       def split_along_l(v, mid_start, mid_end, end):
         pre = jnp.take(v, indices=range(mid_start), axis=2)
@@ -451,22 +456,37 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
         post = jnp.take(v, indices=range(mid_end, end), axis=2)
         return pre, mid, post
 
-      def permute(v):
-        pre, mid, post = split_along_l(v, chunk_offset, original_l - post_len,
-                                       original_l)
-        return jnp.concatenate([mid, pre, post], axis=2)
+      def pad_to_chunk_len(v):
+        width = [(0, 0)] * v.ndim
+        width[2] = (0, chunk_len - v.shape[2])
+        return jnp.pad(v, width, mode='constant', constant_values=0.0)
 
-      def unpermute(v):
-        mid, pre, post = split_along_l(v, original_l - chunk_len,
-                                       original_l - post_len, original_l)
+      def pad_borders(v):
+        total_len = v.shape[2]
+        pre, mid, post = split_along_l(v, chunk_offset,
+                                       total_len - last_chunk_len,
+                                       total_len)
+        pre, post = map(pad_to_chunk_len, [pre, post])
         return jnp.concatenate([pre, mid, post], axis=2)
 
-      queries, keys, values = map(lambda x: chunk_split(permute(x)),
+      def unpad_borders(v):
+        padded_total_len = v.shape[2]
+        assert padded_total_len == original_l + chunk_len
+        pre_padded, mid, post_padded = split_along_l(
+            v, chunk_len,
+            padded_total_len - chunk_len,
+            padded_total_len)
+        pre = jnp.take(pre_padded, indices=range(chunk_offset), axis=2)
+        post = jnp.take(post_padded, indices=range(last_chunk_len), axis=2)
+        return jnp.concatenate([pre, mid, post], axis=2)
+
+      queries, keys, values = map(lambda x: chunk_split(pad_borders(x)),
                                   [queries, keys, values])
       permuted_dots = _calc_attn_scores(queries, keys)
-      permuted_out = chunk_join(jnp.matmul(permuted_dots, values))
+      permuted_out = chunk_join(jnp.matmul(permuted_dots, values),
+                                total_len=original_l + chunk_len)
 
-      out = unpermute(permuted_out)
+      out = unpad_borders(permuted_out)
 
   out = out.astype(jnp.float32)
   return out, None  # We don't store full dots matrix
