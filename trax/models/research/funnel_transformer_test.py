@@ -66,8 +66,8 @@ class FunnelTransformerTest(parameterized.TestCase):
     self.assertEqual(y_cls.shape, long.shape)
     self.assertEqual(y.shape, long.shape)
 
-    self.assertEqual(y_cls.squeeze().tolist(), 5*[2] + 3*[1])
-    self.assertEqual(y.squeeze().tolist(), 8*[2])
+    self.assertEqual(y_cls.squeeze().tolist(), 5 * [2] + 3 * [1])
+    self.assertEqual(y.squeeze().tolist(), 8 * [2])
 
   def test_funnel_block_forward_shape(self):
     n_even = 4
@@ -181,7 +181,7 @@ class FunnelTransformerTest(parameterized.TestCase):
 
           y_2 = _get_output_logits(model, masked_x_2)
           self.assertEqual(y_2.shape[0], input_shape[1])
-          np.testing.assert_array_almost_equal(y_1[:i+1], y_2[:i+1])
+          np.testing.assert_array_almost_equal(y_1[:i + 1], y_2[:i + 1])
 
     model_chunked = ft.RelformerLM(
         vocab_size,
@@ -195,12 +195,11 @@ class FunnelTransformerTest(parameterized.TestCase):
     model_without_chunks = ft.RelformerLM(
         vocab_size,
         shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
-        d_model=d_model, d_ff=4*d_model, n_heads=2,
+        d_model=d_model, d_ff=4 * d_model, n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
         rel_chunk_len=None, vanilla_chunk_len=None,
     )
     test_autoregressive_property(model_without_chunks)
-
 
   def test_funnel_transformer_lm_forward_shape_predict(self):
     d_model = 8
@@ -225,26 +224,6 @@ class FunnelTransformerTest(parameterized.TestCase):
       y = simple_funnel(x)
       self.assertEqual(y.shape, (batch_size, 1, vocab_size))
     gin.clear_config()
-
-  def test_funnel_transformer_lm_forward_shape_eval(self):
-    d_model = 8
-    vocab_size = 7
-    batch_size = 1
-    x = np.zeros((batch_size, 6)).astype(np.int32)
-    simple_funnel = ft.RelformerLM(
-        vocab_size,
-        shorten_factor=3,
-        n_rel_layers=1,
-        vanilla_layers=(1, 1),
-        d_model=d_model,
-        d_ff=d_model,
-        n_heads=2,
-        vanilla_attn_type=tl.SelfAttention,
-        mode='eval')
-
-    _, _ = simple_funnel.init(shapes.signature(x))
-    y = simple_funnel(x)
-    self.assertEqual(y.shape, (batch_size, 6, vocab_size))
 
   def test_funnel_transformer_lm_predict_eval_equal(self):
     d_model = 8
@@ -296,8 +275,8 @@ class FunnelTransformerTest(parameterized.TestCase):
                                rng=jax.random.PRNGKey(0), use_cache=False)
 
     for i in range(n_len_eval):
-      y = predict_funnel(input[:, i:i+1])
-      np.testing.assert_array_almost_equal(y, y_eval[:, i:i+1, :], decimal=5)
+      y = predict_funnel(input[:, i:i + 1])
+      np.testing.assert_array_almost_equal(y, y_eval[:, i:i + 1, :], decimal=5)
 
   def test_autoregressive_sample_relformerlm(self):
     batch_size = 4
