@@ -267,7 +267,7 @@ class RelativeAttention(base.Layer):
     self._dropout = dropout
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._max_len = max_inference_length
-    self._chunk_len = chunk_len
+    self._chunk_len = chunk_len if chunk_len is not None else self._max_len
     self._chunk_offset = chunk_offset
     self._mode = mode
 
@@ -319,14 +319,16 @@ class RelativeAttention(base.Layer):
   def _fast_inference_init_state(self, input_signature):
     """Returns an initial state for causal attention layer fast inference."""
 
-    def zeros_for(bs, shape_dtype):
+    def zeros_for_shape(bs, len, shape_dtype):
       shape, dtype = shape_dtype.as_tuple()
       d_feature = shape[-1]
-      return jnp.zeros((bs, self._max_len, d_feature), dtype=dtype)
+
+      return jnp.zeros((bs, len, d_feature), dtype=dtype)
 
     batch_size = input_signature[0].shape[0]
-    k = zeros_for(batch_size, input_signature[0])
-    v = zeros_for(batch_size, input_signature[1])
+    n_tokens = self._max_len if self._chunk_len is None else self._chunk_len
+    k = zeros_for_shape(batch_size, n_tokens, input_signature[0])
+    v = zeros_for_shape(batch_size, n_tokens, input_signature[1])
     return k, v, jnp.array(0)
 
   def _fast_inference_update_state(self, inputs, state):
@@ -351,13 +353,17 @@ class RelativeAttention(base.Layer):
     length = new_k.shape[1]
     (ks, vs, idx) = state
 
+    # We cannot generate more than one token because it contradicts
+    # all autoregressive properties
     assert length == 1
+
+    new_index = (idx // self._total_kv_pooling) % self._chunk_len
 
     # Keys and values are of shape [batch_size, length, d_kv].
     ks = fastmath.dynamic_update_slice_in_dim(
-        ks, new_k, idx // self._total_kv_pooling, axis=1)
+        ks, new_k, new_index, axis=1)
     vs = fastmath.dynamic_update_slice_in_dim(
-        vs, new_v, idx // self._total_kv_pooling, axis=1)
+        vs, new_v, new_index, axis=1)
 
     self.state = ks, vs, idx + self._n_raw_tokens_generated
 

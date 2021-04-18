@@ -250,8 +250,7 @@ class FunnelTransformerTest(parameterized.TestCase):
                                minval=0,
                                maxval=vocab_size,
                                shape=(batch_size, n_len_eval)).astype(np.int32)
-    _, _ = eval_funnel.init(shapes.signature(input), rng=jax.random.PRNGKey(0),
-                            use_cache=False)
+    _, _ = eval_funnel.init(shapes.signature(input), rng=jax.random.PRNGKey(0))
     y_eval = eval_funnel(input)
     self.assertEqual(y_eval.shape, (batch_size, n_len_eval, vocab_size))
 
