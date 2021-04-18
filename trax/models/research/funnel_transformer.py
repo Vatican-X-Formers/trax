@@ -436,7 +436,7 @@ def _get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
 
 def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
                           mode, ff_activation, context_bias_layer,
-                          location_bias_layer, total_pooling, i,
+                          location_bias_layer, total_pooling,
                           max_inference_length=3072, rel_chunk_len=None,
                           chunk_offset=None):
   """Returns a list of layers that implements a Transformer encoder block.
