@@ -205,6 +205,7 @@ def RelativeAttentionLMLayer(d_feature,
       total_kv_pooling=total_kv_pooling,
       max_inference_length=max_inference_length,
       chunk_len=chunk_len,
+      chunk_offset=chunk_offset,
       n_raw_tokens_generated=n_raw_tokens_generated,
       mode=mode)
 
@@ -360,6 +361,9 @@ class RelativeAttention(base.Layer):
     new_index = idx // self._total_kv_pooling
 
     if self._chunk_len is not None:
+      if self._chunk_offset is not 0:
+        new_index -= self._chunk_offset * (new_index >= self._chunk_offset)
+
       new_index = new_index % self._chunk_len
 
     # Keys and values are of shape [batch_size, length, d_kv].
@@ -623,12 +627,14 @@ class AttentionMaskLayer(base.Layer):
                total_kv_pooling=1,
                max_inference_length=3072,
                chunk_len=None,
+               chunk_offset=None,
                n_raw_tokens_generated=1,
                mode='train'):
     super().__init__(n_in=1, n_out=1)
     self._total_kv_pooling = total_kv_pooling
     self._max_len = max_inference_length
     self._chunk_len = chunk_len
+    self._chunk_offset = chunk_offset
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._mode = mode
 
@@ -648,6 +654,9 @@ class AttentionMaskLayer(base.Layer):
       sequence_length = self._max_len
 
       if self._chunk_len is not None:
+        if self._chunk_offset is not 0:
+          current_token -= self._chunk_offset * \
+                           (current_token >= self._chunk_offset)
         current_token = current_token % self._chunk_len
         sequence_length = self._chunk_len
 
