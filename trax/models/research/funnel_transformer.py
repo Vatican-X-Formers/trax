@@ -878,8 +878,8 @@ def RelformerLM(vocab_size,
         use relative attention.
     rel_chunk_len (optional): Number of tokens per chunk. Setting this option
         will enable chunked relative attention.
-    vanilla_chunk_len (optional): Enables chunked relative attention also in
-        layers before and after shortening.
+    vanilla_chunk_len (optional): If set, enables chunked relative attention
+        also in layers before and after shortening.
     n_heads: Number of attention heads.
     dropout: Stochastic rate (probability) for dropping an activation value
         when applying dropout within an encoder block.
@@ -910,7 +910,10 @@ def RelformerLM(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
-  positional_encoder = PositionalEncoder(mode, dropout, max_len, pos_type)
+  if vanilla_chunk_len is None:
+    positional_encoder = PositionalEncoder(mode, dropout, max_len, pos_type)
+  else:
+    positional_encoder = []
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
