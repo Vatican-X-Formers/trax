@@ -423,8 +423,8 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     return dots
 
   if chunk_len is None or mode == 'predict':
-    chunked_dots = _calc_attn_scores(queries, keys)
-    out = jnp.matmul(chunked_dots, values)
+    full_dots = _calc_attn_scores(queries, keys)
+    out = jnp.matmul(full_dots, values)
   else:
     assert original_l % chunk_len == 0 and original_l >= chunk_len
 
