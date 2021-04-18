@@ -921,8 +921,7 @@ def RelformerLM(vocab_size,
                                                                 n_heads)
 
   def create_reformer_blocks(n_layers, total_kv_pooling=1,
-                             layer_chunk_len=None, force_relative=False,
-                             dense=True):  # pylint: disable=invalid-name
+                             layer_chunk_len=None, force_relative=False):  # pylint: disable=invalid-name
     if n_layers == 0:
       return [tl.LayerNorm()]
 
@@ -965,7 +964,6 @@ def RelformerLM(vocab_size,
         tl.ReversibleSerial(decoder_blocks),
         tl.Concatenate(),
         tl.LayerNorm(),
-        tl.Dense(d_model) if dense else [],
     ]
 
   pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks,
@@ -981,7 +979,7 @@ def RelformerLM(vocab_size,
   )
 
   post_decoder_blocks = create_reformer_blocks(
-      n_post_decoder_blocks, layer_chunk_len=vanilla_chunk_len, dense=False)
+      n_post_decoder_blocks, layer_chunk_len=vanilla_chunk_len)
 
   cacher = RelformerCacher(
       total_kv_pooling=shorten_factor,
