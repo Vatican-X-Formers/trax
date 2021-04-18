@@ -556,7 +556,7 @@ class PositionalEmbeddings(base.Layer):
       return positions
 
     pos_seq_len = self._chunk_len if self._chunk_len is not None else n_tokens
-    offset = pos_seq_len + 1 # offset to be compatible with predict mode
+    offset = pos_seq_len - 1   # offset to be compatible with predict mode
     positions = jnp.arange(pos_seq_len) - offset
 
     return positions
