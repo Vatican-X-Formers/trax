@@ -267,7 +267,7 @@ class RelativeAttention(base.Layer):
     self._dropout = dropout
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._max_len = max_inference_length
-    self._chunk_len = chunk_len if chunk_len is not None else self._max_len
+    self._chunk_len = chunk_len
     self._chunk_offset = chunk_offset
     self._mode = mode
 
@@ -640,8 +640,16 @@ class AttentionMaskLayer(base.Layer):
       # We cannot generate more than one token because it contradicts
       # all autoregressive properties
       assert inputs_len == 1
-      mask = jnp.arange(self._max_len) <= (self.state // self._total_kv_pooling)
-      mask = jnp.reshape(mask, (1, self._max_len))
+
+      current_token = self.state // self._total_kv_pooling
+      sequence_length = self._max_len
+
+      if self._chunk_len is not None:
+        current_token = current_token % self._chunk_len
+        sequence_length = self._chunk_len
+
+      mask = jnp.arange(sequence_length) <= current_token
+      mask = jnp.reshape(mask, (1, sequence_length))
       self.state += self._n_raw_tokens_generated
       return mask
 
