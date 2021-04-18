@@ -121,6 +121,7 @@ def RelativeAttentionLayer(d_feature,
       total_kv_pooling,
       max_inference_length=max_inference_length,
       chunk_len=chunk_len,
+      chunk_offset=chunk_offset,
       n_raw_tokens_generated=n_raw_tokens_generated,
       mode=mode)
 
@@ -320,11 +321,11 @@ class RelativeAttention(base.Layer):
   def _fast_inference_init_state(self, input_signature):
     """Returns an initial state for causal attention layer fast inference."""
 
-    def zeros_for_shape(bs, len, shape_dtype):
+    def zeros_for_shape(bs, tokens_len, shape_dtype):
       shape, dtype = shape_dtype.as_tuple()
       d_feature = shape[-1]
 
-      return jnp.zeros((bs, len, d_feature), dtype=dtype)
+      return jnp.zeros((bs, tokens_len, d_feature), dtype=dtype)
 
     batch_size = input_signature[0].shape[0]
     n_tokens = self._chunk_len if self._chunk_len is not None else self._max_len
@@ -361,7 +362,7 @@ class RelativeAttention(base.Layer):
     new_index = idx // self._total_kv_pooling
 
     if self._chunk_len is not None:
-      if self._chunk_offset is not 0:
+      if self._chunk_offset != 0:
         new_index -= self._chunk_offset * (new_index >= self._chunk_offset)
 
       new_index = new_index % self._chunk_len
@@ -505,6 +506,20 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
   return out, None  # We don't store full dots matrix
 
 
+def calc_predict_next_token_index(state, total_kv_pooling, max_len,
+                                  chunk_len, chunk_offset):
+  current_token = state // total_kv_pooling
+  sequence_length = max_len
+
+  if chunk_len is not None:
+    if chunk_offset != 0:
+      current_token -= chunk_offset * \
+                       (current_token >= chunk_offset)
+    current_token = current_token % chunk_len
+    sequence_length = chunk_len
+  return current_token, sequence_length
+
+
 class PositionalEmbeddings(base.Layer):
   """Positional embedding for relative attention.
 
@@ -518,6 +533,7 @@ class PositionalEmbeddings(base.Layer):
                total_kv_pooling,
                max_inference_length=3072,
                chunk_len=None,
+               chunk_offset=None,
                n_raw_tokens_generated=1,
                mode='train'):
     """The init method of positional embeddings.
@@ -541,6 +557,7 @@ class PositionalEmbeddings(base.Layer):
     self._total_kv_pooling = total_kv_pooling
     self._max_len = max_inference_length
     self._chunk_len = chunk_len
+    self._chunk_offset = chunk_offset
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._mode = mode
 
@@ -551,20 +568,17 @@ class PositionalEmbeddings(base.Layer):
 
   def PositionsVectors(self, n_tokens):
     if self._mode == 'predict':
-      cur_token = self.state // self._total_kv_pooling
-      pos_seq_len = self._max_len
-
-      if self._chunk_len is not None:
-        cur_token = cur_token % self._chunk_len
-        pos_seq_len = self._chunk_len
-
-      positions = jnp.arange(0, pos_seq_len, 1.0) - cur_token
+      current_token, sequence_length = calc_predict_next_token_index(
+          self.state, self._total_kv_pooling, self._max_len,
+          self._chunk_len, self._chunk_offset
+      )
+      positions = jnp.arange(0, sequence_length, 1.0) - current_token
       self.state = self.state + self._n_raw_tokens_generated
       return positions
 
-    pos_seq_len = self._chunk_len if self._chunk_len is not None else n_tokens
-    offset = pos_seq_len - 1   # offset to be compatible with predict mode
-    positions = jnp.arange(pos_seq_len) - offset
+    sequence_length = self._chunk_len if self._chunk_len is not None else n_tokens
+    offset = sequence_length - 1   # offset to be compatible with predict mode
+    positions = jnp.arange(sequence_length) - offset
 
     return positions
 
@@ -639,10 +653,6 @@ class AttentionMaskLayer(base.Layer):
     self._mode = mode
 
   def forward(self, inputs):
-    if self._chunk_len is not None:
-      return jnp.tril(jnp.ones((self._chunk_len, self._chunk_len),
-                               dtype=jnp.bool_))
-
     inputs_len = inputs.shape[1]
 
     if self._mode == 'predict':
@@ -650,20 +660,19 @@ class AttentionMaskLayer(base.Layer):
       # all autoregressive properties
       assert inputs_len == 1
 
-      current_token = self.state // self._total_kv_pooling
-      sequence_length = self._max_len
-
-      if self._chunk_len is not None:
-        if self._chunk_offset is not 0:
-          current_token -= self._chunk_offset * \
-                           (current_token >= self._chunk_offset)
-        current_token = current_token % self._chunk_len
-        sequence_length = self._chunk_len
+      current_token, sequence_length = calc_predict_next_token_index(
+          self.state, self._total_kv_pooling, self._max_len,
+          self._chunk_len, self._chunk_offset
+      )
 
       mask = jnp.arange(sequence_length) <= current_token
       mask = jnp.reshape(mask, (1, sequence_length))
       self.state += self._n_raw_tokens_generated
       return mask
+
+    if self._chunk_len is not None:
+      return jnp.tril(jnp.ones((self._chunk_len, self._chunk_len),
+                               dtype=jnp.bool_))
 
     return jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
 
