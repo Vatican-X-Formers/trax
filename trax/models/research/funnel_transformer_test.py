@@ -226,56 +226,66 @@ class FunnelTransformerTest(parameterized.TestCase):
     gin.clear_config()
 
   def test_funnel_transformer_lm_predict_eval_equal(self):
-    d_model = 8
-    vocab_size = 4
-    batch_size = 1
-    n_len_eval = 21
-    attention_type = tl.SelfAttention
+    def _test_for_chunk_lens(rel_chunk_len, vanilla_chunk_len):
+      d_model = 8
+      vocab_size = 4
+      batch_size = 1
+      n_len_eval = 42
+      attention_type = tl.SelfAttention
 
-    shorten_factor = 3
-    n_rel_layers = 2
-    vanilla_layers = (1, 1)
-    n_heads = 2
+      shorten_factor = 3
+      n_rel_layers = 2
+      vanilla_layers = (1, 1)
+      n_heads = 2
 
-    eval_funnel = ft.RelformerLM(
-        vocab_size,
-        shorten_factor=shorten_factor,
-        n_rel_layers=n_rel_layers,
-        vanilla_layers=vanilla_layers,
-        d_model=d_model, d_ff=d_model, n_heads=n_heads,
-        vanilla_attn_type=attention_type,
-        mode='eval')
+      eval_funnel = ft.RelformerLM(
+          vocab_size,
+          shorten_factor=shorten_factor,
+          n_rel_layers=n_rel_layers,
+          vanilla_layers=vanilla_layers,
+          d_model=d_model, d_ff=d_model, n_heads=n_heads,
+          vanilla_attn_type=attention_type,
+          rel_chunk_len=rel_chunk_len,
+          vanilla_chunk_len=vanilla_chunk_len,
+          mode='eval')
 
-    input = jax.random.randint(key=jax.random.PRNGKey(0),
-                               minval=0,
-                               maxval=vocab_size,
-                               shape=(batch_size, n_len_eval)).astype(np.int32)
-    _, _ = eval_funnel.init(shapes.signature(input), rng=jax.random.PRNGKey(0))
-    y_eval = eval_funnel(input)
-    self.assertEqual(y_eval.shape, (batch_size, n_len_eval, vocab_size))
+      input = jax.random.randint(key=jax.random.PRNGKey(0),
+                                 minval=0,
+                                 maxval=vocab_size,
+                                 shape=(batch_size, n_len_eval)).astype(
+        np.int32)
+      _, _ = eval_funnel.init(shapes.signature(input),
+                              rng=jax.random.PRNGKey(0))
+      y_eval = eval_funnel(input)
+      self.assertEqual(y_eval.shape, (batch_size, n_len_eval, vocab_size))
 
-    if attention_type == tl.SelfAttention:
-      gin.bind_parameter('trax.layers.SelfAttention.chunk_len', n_len_eval)
+      if attention_type == tl.SelfAttention:
+        gin.bind_parameter('trax.layers.SelfAttention.chunk_len', n_len_eval)
 
-    predict_funnel = ft.RelformerLM(
-        vocab_size,
-        shorten_factor=shorten_factor,
-        n_rel_layers=n_rel_layers,
-        vanilla_layers=vanilla_layers,
-        d_model=d_model, d_ff=d_model, n_heads=n_heads,
-        vanilla_attn_type=attention_type,
-        mode='predict')
+      predict_funnel = ft.RelformerLM(
+          vocab_size,
+          shorten_factor=shorten_factor,
+          n_rel_layers=n_rel_layers,
+          vanilla_layers=vanilla_layers,
+          d_model=d_model, d_ff=d_model, n_heads=n_heads,
+          vanilla_attn_type=attention_type,
+          rel_chunk_len=rel_chunk_len,
+          vanilla_chunk_len=vanilla_chunk_len,
+          mode='predict')
 
-    input = np.concatenate(
-        [np.zeros((batch_size, 1)).astype(np.int32), input], axis=1)
-    input = input[:, :-1]
+      input = np.concatenate(
+          [np.zeros((batch_size, 1)).astype(np.int32), input], axis=1)
+      input = input[:, :-1]
 
-    _, _ = predict_funnel.init(shapes.signature(input[:, 0:1]),
-                               rng=jax.random.PRNGKey(0), use_cache=False)
+      _, _ = predict_funnel.init(shapes.signature(input[:, 0:1]),
+                                 rng=jax.random.PRNGKey(0), use_cache=False)
 
-    for i in range(n_len_eval):
-      y = predict_funnel(input[:, i:i + 1])
-      np.testing.assert_array_almost_equal(y, y_eval[:, i:i + 1, :], decimal=5)
+      for i in range(n_len_eval):
+        y = predict_funnel(input[:, i:i + 1])
+        np.testing.assert_array_almost_equal(y, y_eval[:, i:i + 1, :],
+                                             decimal=5)
+    _test_for_chunk_lens(rel_chunk_len=None, vanilla_chunk_len=None)
+    _test_for_chunk_lens(rel_chunk_len=2, vanilla_chunk_len=6)
 
   def test_autoregressive_sample_relformerlm(self):
     batch_size = 4
