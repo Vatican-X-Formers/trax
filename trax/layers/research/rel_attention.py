@@ -326,7 +326,7 @@ class RelativeAttention(base.Layer):
       return jnp.zeros((bs, len, d_feature), dtype=dtype)
 
     batch_size = input_signature[0].shape[0]
-    n_tokens = self._max_len if self._chunk_len is None else self._chunk_len
+    n_tokens = self._chunk_len if self._chunk_len is not None else self._max_len
     k = zeros_for_shape(batch_size, n_tokens, input_signature[0])
     v = zeros_for_shape(batch_size, n_tokens, input_signature[1])
     return k, v, jnp.array(0)
@@ -357,7 +357,10 @@ class RelativeAttention(base.Layer):
     # all autoregressive properties
     assert length == 1
 
-    new_index = (idx // self._total_kv_pooling) % self._chunk_len
+    new_index = idx // self._total_kv_pooling
+
+    if self._chunk_len is not None:
+      new_index = new_index % self._chunk_len
 
     # Keys and values are of shape [batch_size, length, d_kv].
     ks = fastmath.dynamic_update_slice_in_dim(
