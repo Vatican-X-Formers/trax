@@ -123,9 +123,10 @@ class FunnelTransformerTest(parameterized.TestCase):
     d_model = 16
     vocab_size = 7
     len = 48
-    x = np.ones((3, len)).astype(np.int32)
+    batch_size = 3
+    x = np.ones((batch_size, len)).astype(np.int32)
 
-    simple_funnel = ft.RelformerLM(
+    model_chunked = ft.RelformerLM(
         vocab_size,
         shorten_factor=3,
         n_rel_layers=3,
@@ -133,11 +134,26 @@ class FunnelTransformerTest(parameterized.TestCase):
         d_model=d_model, d_ff=d_model, n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
         rel_chunk_len=4,
+        vanilla_chunk_len=2,
         max_len=48
     )
-    _, _ = simple_funnel.init(shapes.signature(x))
-    y = simple_funnel(x)
-    self.assertEqual(y.shape, (3, len, vocab_size))
+    _, _ = model_chunked.init(shapes.signature(x))
+    y = model_chunked(x)
+    self.assertEqual(y.shape, (batch_size, len, vocab_size))
+
+    model_without_chunks = ft.RelformerLM(
+        vocab_size,
+        shorten_factor=3,
+        n_rel_layers=3,
+        vanilla_layers=(1, 1),
+        d_model=d_model, d_ff=d_model, n_heads=2,
+        vanilla_attn_type=tl.SelfAttention,
+        max_len=48
+    )
+
+    _, _ = model_without_chunks.init(shapes.signature(x))
+    y = model_without_chunks(x)
+    self.assertEqual(y.shape, (batch_size, len, vocab_size))
 
   def test_funnel_transformer_lm_autoregressive_property(self):
     input_shape = (1, 12)
@@ -153,28 +169,38 @@ class FunnelTransformerTest(parameterized.TestCase):
       output_logits, *_ = unitialized_eval_model(x, rng=rng_1)
       return output_logits
 
-    with fastmath.use_backend(fastmath.Backend.JAX):
-      model = ft.RelformerLM(
-          vocab_size,
-          shorten_factor=3,
-          n_rel_layers=2,
-          vanilla_layers=(1, 1),
-          d_model=d_model, d_ff=4*d_model, n_heads=2,
-          vanilla_attn_type=tl.SelfAttention,
-          rel_chunk_len=2
-      )
+    def test_autoregressive_property(model):
+      with fastmath.use_backend(fastmath.Backend.JAX):
+        x_1 = jax.random.randint(rng_1, input_shape, 0, vocab_size)
+        y_1 = _get_output_logits(model, x_1)
 
-      x_1 = jax.random.randint(rng_1, input_shape, 0, vocab_size)
-      y_1 = _get_output_logits(model, x_1)
+        x_2 = jax.random.randint(rng_2, input_shape, 0, vocab_size)
 
-      x_2 = jax.random.randint(rng_2, input_shape, 0, vocab_size)
+        for i in range(input_shape[1]):
+          masked_x_2 = np.concatenate((x_1[:, :i], x_2[:, i:]), axis=1)
 
-      for i in range(input_shape[1]):
-        masked_x_2 = np.concatenate((x_1[:, :i], x_2[:, i:]), axis=1)
+          y_2 = _get_output_logits(model, masked_x_2)
+          self.assertEqual(y_2.shape[0], input_shape[1])
+          np.testing.assert_array_almost_equal(y_1[:i+1], y_2[:i+1])
 
-        y_2 = _get_output_logits(model, masked_x_2)
-        self.assertEqual(y_2.shape[0], input_shape[1])
-        np.testing.assert_array_almost_equal(y_1[:i+1], y_2[:i+1])
+    model_chunked = ft.RelformerLM(
+        vocab_size,
+        shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
+        d_model=d_model, d_ff=4 * d_model, n_heads=2,
+        vanilla_attn_type=tl.SelfAttention,
+        rel_chunk_len=2, vanilla_chunk_len=4,
+    )
+    test_autoregressive_property(model_chunked)
+
+    model_without_chunks = ft.RelformerLM(
+        vocab_size,
+        shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
+        d_model=d_model, d_ff=4*d_model, n_heads=2,
+        vanilla_attn_type=tl.SelfAttention,
+        rel_chunk_len=None, vanilla_chunk_len=None,
+    )
+    test_autoregressive_property(model_without_chunks)
+
 
   def test_funnel_transformer_lm_forward_shape_predict(self):
     d_model = 8

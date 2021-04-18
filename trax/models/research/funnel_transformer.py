@@ -921,16 +921,20 @@ def RelformerLM(vocab_size,
                                                                 n_heads)
 
   def create_reformer_blocks(n_layers, total_kv_pooling=1,
-                             layer_chunk_len=None,
+                             layer_chunk_len=None, force_relative=False,
                              dense=True):  # pylint: disable=invalid-name
     if n_layers == 0:
       return [tl.LayerNorm()]
 
     def determine_attn_type(layer_number):
-      if layer_chunk_len is None:
+      if layer_chunk_len is None and not force_relative:
         return vanilla_attn_type
 
-      chunk_offset = layer_chunk_len // 2 if layer_number % 2 == 0 else 0
+      if layer_chunk_len is not None:
+        chunk_offset = (layer_number % 2) * (layer_chunk_len // 2)
+      else:
+        chunk_offset = None
+
       return functools.partial(RelativeAttentionWrapper,
                                context_bias_layer=context_bias_layer,
                                location_bias_layer=location_bias_layer,
@@ -969,7 +973,7 @@ def RelformerLM(vocab_size,
 
   relative_decoder_blocks = create_reformer_blocks(
       n_rel_layers, total_kv_pooling=shorten_factor,
-      layer_chunk_len=rel_chunk_len)
+      layer_chunk_len=rel_chunk_len, force_relative=True)
 
   conv_layer = tl.Serial(
       tl.CausalConv(d_model, shorten_factor),

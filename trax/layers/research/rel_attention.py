@@ -66,9 +66,8 @@ def RelativeAttentionWrapper(
         n_raw_tokens_generated=None,
         max_inference_length=3072,
         total_kv_pooling=1,
-        chunk_len=128,
-        chunk_offset=64):
-  # TODO: this will be attn_type for DecoderBlock
+        chunk_len=None,
+        chunk_offset=None):
   del d_v, causal, masked, output_dropout
   return RelativeAttentionLMLayer(d_feature=d_qk * n_heads,
                                   context_bias_layer=context_bias_layer,
@@ -212,10 +211,10 @@ def RelativeAttentionLMLayer(d_feature,
   return cb.Serial(
       cb.Branch(
           None,
-          mask_layer,  # q, k, v, mask
+          mask_layer,           # vecs, mask
       ),
-      attention,  # vecs, mask
-      cb.Select([0], n_in=2),  # vecs
+      attention,                # vecs, mask
+      cb.Select([0], n_in=2),   # vecs
   )
 
 
@@ -259,7 +258,7 @@ class RelativeAttention(base.Layer):
       chunk_len (optional): Number of tokens per chunk. Setting this option will
         enable chunked attention.
       chunk_offset (optional): Offset for shifting chunks, for shifted chunked
-        attention
+        attention.
       mode: One of `'train'`, `'eval'`, or `'predict'`.
     """
     super().__init__(n_in=7, n_out=2)
