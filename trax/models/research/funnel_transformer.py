@@ -924,9 +924,7 @@ def RelformerLM(vocab_size,
                        mode=mode))
 
     return [
-        tl.Dup(),
         tl.ReversibleSerial(decoder_blocks),
-        tl.Concatenate(),
         tl.LayerNorm(),
     ]
 
@@ -936,11 +934,6 @@ def RelformerLM(vocab_size,
   relative_decoder_blocks = create_reformer_blocks(
       n_rel_layers, total_kv_pooling=shorten_factor,
       layer_chunk_len=rel_chunk_len, force_relative=True)
-
-  conv_layer = tl.Serial(
-      tl.CausalConv(d_model, shorten_factor),
-      ff_activation()
-  )
 
   post_decoder_blocks = create_reformer_blocks(
       n_post_decoder_blocks, layer_chunk_len=vanilla_chunk_len)
@@ -957,35 +950,25 @@ def RelformerLM(vocab_size,
       n_raw_tokens_generated=n_raw_tokens_generated,
       mode=mode)
 
-  cacher_conv = RelformerCacher(
-      total_kv_pooling=shorten_factor,
-      n_raw_tokens_generated=n_raw_tokens_generated,
-      max_inference_length=max_len,
-      shift=shorten_factor - 1,
-      sliding=True,
-      mode=mode)
-
-  picker_conv = PickLastTokenInPredict(mode=mode)
-
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,  # vecs
       positional_encoder,
-      pre_decoder_blocks,  # vecs
       tl.Dup(),
+      pre_decoder_blocks,  # vecs
       cacher,
       tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
       _DownsamplerLM(shorten_factor, d_model),
+      tl.Dup(),
       relative_decoder_blocks,
+      tl.Concatenate(),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       _UpsamplerLM(shorten_factor, d_model),
       tl.LayerNorm(),
       picker,
-      tl.Concatenate(),
-      cacher_conv,
-      conv_layer,
-      picker_conv,
       post_decoder_blocks,
+      tl.Concatenate(),
+      tl.LayerNorm(),
       tl.Dense(vocab_size),  # vecs
   )
