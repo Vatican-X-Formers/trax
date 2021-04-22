@@ -137,7 +137,7 @@ def RelativeAttentionLayer(d_feature,
       cb.Branch(
           cb.Serial(pos_emb, core.Dense(d_feature)),
           core.Dense(d_feature),
-          core.Dense(d_feature),
+          None,
           core.Dense(d_feature),
           cb.Select([1])  # mask
       ),
