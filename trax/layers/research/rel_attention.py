@@ -135,10 +135,10 @@ def RelativeAttentionLayer(d_feature,
 
   return cb.Serial(
       cb.Branch(
-          cb.Serial(pos_emb, core.Dense(d_feature)),
+          cb.Serial(pos_emb),
           core.Dense(d_feature),
           None,
-          core.Dense(d_feature),
+          None,
           cb.Select([1])  # mask
       ),
       context_bias_layer,
