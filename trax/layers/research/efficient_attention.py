@@ -2753,6 +2753,23 @@ class PureLSHSelfAttention(base.Layer):
     # q, v are shaped (seqlen, d_head)
     # mask is shaped (seqlen,)
     q = qk
+
+    def apply_rotary(vec):
+      sin = PositionsVectors(vec[None, ...], sin=True)
+      cos = PositionsVectors(vec[None, ...], sin=False)
+
+      p1 = sin * vec
+
+      alter = np.tile(np.array([-1, 1]), reps=vec.shape[1] // 2)
+      vec_permuted = np.dstack([vec[:, 1::2], vec[:, ::2]]).ravel().reshape(
+          *vec.shape)
+      vec_permuted = vec_permuted * alter
+      p2 = cos * vec_permuted
+
+      return p1 + p2
+
+    q = apply_rotary(q)
+
     seqlen = q.shape[0]
 
     if update_state:
@@ -3492,7 +3509,7 @@ class PureLSHSelfAttentionWrapper(cb.Serial):
                masked=False,
                output_dropout=0.0,
                attention_dropout=0.0,
-               pure_lsh_implementation=None,
+               pure_lsh_implementation=PureLSHSelfAttention,
                bias=True,
                mode='train',
                num_weights=3,
