@@ -225,8 +225,6 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     bd = bd.at[:, :, 0, :].set(0)
 
   dots = (ac + bd) / jnp.sqrt(d_feature)
-  if mask is not None:
-    dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
   # Softmax.
   dots = jnp.exp(dots - fastmath.logsumexp(dots, axis=-1, keepdims=True))
   if dropout >= 1.0:
