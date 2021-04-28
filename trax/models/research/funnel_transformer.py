@@ -25,8 +25,6 @@ from trax import fastmath
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
-from trax.layers import core
-from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer, \
   RelativeAttentionWrapper
@@ -779,6 +777,15 @@ class RelformerPicker(tl.Layer):
       self.state = jnp.array(0)
 
 
+class CalculateTargetStarts(tl.Layer):
+  def __init__(self):
+    super().__init__(n_in=1, n_out=1)
+
+  def forward(self, x):
+    sep_indices = jnp.argmin(x, axis=-1)
+    return sep_indices
+
+
 def PickLastTokenInPredict(mode='train'):
   """Picks the last token logits.
 
@@ -969,9 +976,11 @@ def RelformerLM(vocab_size,
 
   picker_conv = PickLastTokenInPredict(mode=mode)
 
+  calc_target_starts = tl.Branch(None, CalculateTargetStarts())
+
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
-      tl.ShiftRight(mode=mode),  # toks
+      calc_target_starts,
       token_encoder,  # vecs
       positional_encoder,
       pre_decoder_blocks,  # vecs
@@ -989,5 +998,6 @@ def RelformerLM(vocab_size,
       conv_layer,
       picker_conv,
       post_decoder_blocks,
+      tl.Select([0], n_in=2), # Remove target starts
       tl.Dense(vocab_size),  # vecs
   )

@@ -634,7 +634,7 @@ class AttentionMaskLayer(base.Layer):
                chunk_offset=None,
                n_raw_tokens_generated=1,
                mode='train'):
-    super().__init__(n_in=1, n_out=1)
+    super().__init__(n_in=2 + (total_kv_pooling > 1), n_out=1)
     self._total_kv_pooling = total_kv_pooling
     self._max_len = max_inference_length
     self._chunk_len = chunk_len
@@ -643,8 +643,7 @@ class AttentionMaskLayer(base.Layer):
     self._mode = mode
 
   def forward(self, inputs):
-    inputs_len = inputs.shape[1]
-
+    batch_size, inputs_len = inputs[0].shape[:2]
     if self._mode == 'predict':
       # We cannot generate more than one token because it contradicts
       # all autoregressive properties
@@ -661,12 +660,47 @@ class AttentionMaskLayer(base.Layer):
       return mask
 
     if self._chunk_len is not None:
-      return jnp.tril(jnp.ones((self._chunk_len, self._chunk_len),
-                               dtype=jnp.bool_))
+      if self._total_kv_pooling > 1:
+        target_start_index = inputs[2]
+      else:
+        target_start_index = inputs[1]
+      assert target_start_index.shape == (batch_size,)
+
+      total_len = inputs_len
+      if self._chunk_offset != 0:
+        total_len += self._chunk_len
+      assert total_len % self._chunk_len == 0
+      n_chunks = total_len // self._chunk_len
+
+      bidirectional_mask = jnp.ones((self._chunk_len, self._chunk_len),
+                                    dtype=jnp.bool_)
+      autoregressive_mask = jnp.tril(bidirectional_mask)
+
+      chunk_indices = jnp.repeat(jnp.arange(0, n_chunks)[:, None],
+                                 repeats=batch_size,
+                                 axis=1)
+
+      chunk_boundaries = self._calculate_chunk_boundaries(target_start_index,
+                                                          n_chunks)
+      condition = jnp.array(chunk_boundaries >= chunk_indices, dtype=jnp.bool_)
+
+      condition_broad = jnp.tile(condition[..., None, None],
+                                 (1, 1, self._chunk_len, self._chunk_len))
+      total_mask = jnp.where(condition_broad, autoregressive_mask,
+                             bidirectional_mask)
+
+      return total_mask.reshape(batch_size * n_chunks, 1, self._chunk_len,
+                                self._chunk_len)
 
     return jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
+
+  def _calculate_chunk_boundaries(self, target_start_idx, n_chunks):
+    # TODO: account for total_kv_pooling,
+    #  make sure +-1 works (these start indices are before shifting right!)
+    return target_start_idx // self._chunk_len
 
   def init_weights_and_state(self, input_signature):
     """Initializes this layer for fast inference, if in ``'predict'`` mode."""
     if self._mode == 'predict':
       self.state = jnp.array(0)
+
