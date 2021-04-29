@@ -680,8 +680,7 @@ class AttentionMaskLayer(base.Layer):
                                  repeats=batch_size,
                                  axis=1)
 
-      chunk_boundaries = self._calculate_chunk_boundaries(target_start_index,
-                                                          n_chunks)
+      chunk_boundaries = self._calculate_chunk_boundaries(target_start_index)
       condition = jnp.array(chunk_boundaries >= chunk_indices, dtype=jnp.bool_)
 
       condition_broad = jnp.tile(condition[..., None, None],
@@ -694,10 +693,12 @@ class AttentionMaskLayer(base.Layer):
 
     return jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
 
-  def _calculate_chunk_boundaries(self, target_start_idx, n_chunks):
+  def _calculate_chunk_boundaries(self, target_start_idx):
     # TODO: account for total_kv_pooling,
     #  make sure +-1 works (these start indices are before shifting right!)
-    return target_start_idx // self._chunk_len
+    # TODO: this won't work very well: we need to account for pooling and chunks
+    #  separately - remember the later shifting by sf-1 too!
+    return (target_start_idx + 1) // (self._total_kv_pooling * self._chunk_len)
 
   def init_weights_and_state(self, input_signature):
     """Initializes this layer for fast inference, if in ``'predict'`` mode."""

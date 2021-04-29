@@ -980,6 +980,7 @@ def RelformerLM(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
+      tl.ShiftRight(mode=mode),
       calc_target_starts,
       token_encoder,  # vecs
       positional_encoder,
