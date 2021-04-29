@@ -600,6 +600,7 @@ def Sinusoidal_Embeddings(positions, d_feature):
 
 
 def _fast_matrix_shift(x):
+  # TODO: bidirectional parameter to switch between implementations
   # Implements necessary shift for relative positional attention calculations.
   shift = 1
   batch_size, n_head = x.shape[0], x.shape[1]
@@ -681,12 +682,12 @@ class AttentionMaskLayer(base.Layer):
                                  axis=1)
 
       chunk_boundaries = self._calculate_chunk_boundaries(target_start_index)
-      condition = jnp.array(chunk_boundaries >= chunk_indices, dtype=jnp.bool_)
+      condition = jnp.array(chunk_indices < chunk_boundaries, dtype=jnp.bool_)
 
       condition_broad = jnp.tile(condition[..., None, None],
                                  (1, 1, self._chunk_len, self._chunk_len))
-      total_mask = jnp.where(condition_broad, autoregressive_mask,
-                             bidirectional_mask)
+      total_mask = jnp.where(condition_broad, bidirectional_mask,
+                             autoregressive_mask)
 
       return total_mask.reshape(batch_size * n_chunks, 1, self._chunk_len,
                                 self._chunk_len)
@@ -694,14 +695,14 @@ class AttentionMaskLayer(base.Layer):
     return jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
 
   def _calculate_chunk_boundaries(self, target_start_idx):
-    # TODO: account for total_kv_pooling,
-    #  make sure +-1 works (these start indices are before shifting right!)
-    # TODO: this won't work very well: we need to account for pooling and chunks
-    #  separately - remember the later shifting by sf-1 too!
-    return (target_start_idx + 1) // (self._total_kv_pooling * self._chunk_len)
+    target_start_idx = (target_start_idx + self._total_kv_pooling + 1) \
+                       // self._total_kv_pooling
+
+    target_start_shifted = (target_start_idx + self._chunk_offset) \
+                           // self._chunk_len
+    return target_start_shifted
 
   def init_weights_and_state(self, input_signature):
     """Initializes this layer for fast inference, if in ``'predict'`` mode."""
     if self._mode == 'predict':
       self.state = jnp.array(0)
-
