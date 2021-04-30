@@ -559,7 +559,7 @@ class PositionalEmbeddings(base.Layer):
     pos_emb = Sinusoidal_Embeddings(positions, self._d_feature)
     return pos_emb
 
-  def PositionsVectors(self, n_tokens):
+  def PositionsVectors(self, n_tokens, is_bidirectional=True):
     if self._mode == 'predict':
       current_token, sequence_length = calc_predict_next_token_index(
           self.state, self._total_kv_pooling, self._max_len,
@@ -570,8 +570,12 @@ class PositionalEmbeddings(base.Layer):
       return positions
 
     sequence_length = self._chunk_len if self._chunk_len is not None else n_tokens
-    offset = sequence_length - 1  # offset to be compatible with predict mode
-    positions = jnp.arange(sequence_length) - offset
+
+    if is_bidirectional:
+      positions = jnp.arange(-sequence_length + 1, sequence_length, 1.0)
+    else:
+      offset = sequence_length - 1  # offset to be compatible with predict mode
+      positions = jnp.arange(sequence_length) - offset
 
     return positions
 
@@ -602,16 +606,30 @@ def Sinusoidal_Embeddings(positions, d_feature):
   return pos_emb
 
 
-def _fast_matrix_shift(x):
+def _fast_matrix_shift(x, is_bidirectional=True):
   # TODO: bidirectional parameter to switch between implementations
   # Implements necessary shift for relative positional attention calculations.
-  shift = 1
-  batch_size, n_head = x.shape[0], x.shape[1]
-  queries_len, keys_len = x.shape[2], x.shape[3]
-  zero_pad = jnp.zeros((batch_size, n_head, queries_len, shift))
-  x = jnp.concatenate([zero_pad, x], axis=3)
-  x = x.reshape(batch_size, n_head, keys_len + shift, queries_len)
-  x = x[:, :, shift:, :]
+
+  if is_bidirectional:
+    shift = 1
+    bsz, n_head = x.shape[0], x.shape[1]
+    qlen, klen = x.shape[2], (x.shape[3] + 1) // 2
+
+    zero_pad = jnp.zeros((bsz, n_head, qlen, shift))
+    x = jnp.concatenate([zero_pad, x], axis=3)
+    x = x.reshape(bsz, n_head, 2 * klen - 1 + shift, qlen)
+    x = x[:, :, shift:, :]
+    x = x.reshape(bsz, n_head, qlen, klen * 2 - 1)
+    x = x[:, :, :, shift - 1:shift - 1 + klen]
+  else:
+    shift = 1
+    batch_size, n_head = x.shape[0], x.shape[1]
+    queries_len, keys_len = x.shape[2], x.shape[3]
+    zero_pad = jnp.zeros((batch_size, n_head, queries_len, shift))
+    x = jnp.concatenate([zero_pad, x], axis=3)
+    x = x.reshape(batch_size, n_head, keys_len + shift, queries_len)
+    x = x[:, :, shift:, :]
+
   return x
 
 
