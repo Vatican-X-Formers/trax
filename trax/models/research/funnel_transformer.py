@@ -815,6 +815,7 @@ def RelformerLM(vocab_size,
                 n_rel_layers=6,
                 rel_chunk_len=None,
                 vanilla_chunk_len=None,
+                prefix_lm=False,
                 n_heads=8,
                 dropout=0.1,
                 dropout_shared_axes=None,
@@ -881,6 +882,15 @@ def RelformerLM(vocab_size,
     A Transformer language model as a layer that maps from a tensor of tokens
     to activations over a vocab set.
   """
+  if prefix_lm:
+    find_prefix_end = tl.Fn('FindPrefixEnd',
+                                   lambda x: jnp.argmin(x, axis=-1))
+    shift_right = [
+      tl.Branch(None, find_prefix_end),
+      tl.ShiftRight(mode=mode)
+    ]
+  else:
+    shift_right = tl.ShiftRight(mode=mode)
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
@@ -913,7 +923,8 @@ def RelformerLM(vocab_size,
                                max_inference_length=max_len,
                                total_kv_pooling=total_kv_pooling,
                                chunk_len=layer_chunk_len,
-                               chunk_offset=chunk_offset)
+                               chunk_offset=chunk_offset,
+                               prefix_lm=prefix_lm)
 
     d_per_head = d_model // n_heads
 
@@ -976,12 +987,9 @@ def RelformerLM(vocab_size,
 
   picker_conv = PickLastTokenInPredict(mode=mode)
 
-  calc_target_starts = tl.Branch(None, CalculateTargetStarts())
-
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
-      calc_target_starts,
-      tl.ShiftRight(mode=mode),
+      shift_right,
       token_encoder,  # vecs
       positional_encoder,
       pre_decoder_blocks,  # vecs
@@ -999,6 +1007,6 @@ def RelformerLM(vocab_size,
       conv_layer,
       picker_conv,
       post_decoder_blocks,
-      tl.Select([0], n_in=2), # Remove target starts
+      tl.Select([0], n_in=2) if prefix_lm else [],  # Remove target starts
       tl.Dense(vocab_size),  # vecs
   )

@@ -48,7 +48,6 @@ from trax.layers.assert_shape import assert_shape
 from trax.layers.attention import MergeHeads
 from trax.layers.attention import SplitIntoHeads
 
-
 # Layers are always CamelCase, but functions in general are snake_case
 # pylint: disable=invalid-name
 
@@ -66,7 +65,8 @@ def RelativeAttentionWrapper(
     max_inference_length=3072,
     total_kv_pooling=1,
     chunk_len=None,
-    chunk_offset=None):
+    chunk_offset=None,
+    prefix_lm=False):
   del d_v, causal, masked, output_dropout
   return RelativeAttentionLMLayer(d_feature=d_qk * n_heads,
                                   total_kv_pooling=total_kv_pooling,
@@ -76,6 +76,7 @@ def RelativeAttentionWrapper(
                                   max_inference_length=max_inference_length,
                                   chunk_len=chunk_len,
                                   chunk_offset=chunk_offset,
+                                  prefix_lm=prefix_lm,
                                   mode=mode)
 
 
@@ -157,6 +158,7 @@ def RelativeAttentionLMLayer(d_feature,
                              max_inference_length=3072,
                              chunk_len=None,
                              chunk_offset=None,
+                             prefix_lm=False,
                              mode='train'):
   """Returns a layer that maps (q, k, v) to (activations).
 
@@ -197,6 +199,7 @@ def RelativeAttentionLMLayer(d_feature,
       max_inference_length=max_inference_length,
       chunk_len=chunk_len,
       chunk_offset=chunk_offset,
+      prefix_lm=prefix_lm,
       n_raw_tokens_generated=n_raw_tokens_generated,
       mode=mode)
 
@@ -633,13 +636,16 @@ class AttentionMaskLayer(base.Layer):
                max_inference_length=3072,
                chunk_len=None,
                chunk_offset=None,
+               prefix_lm=False,
                n_raw_tokens_generated=1,
                mode='train'):
-    super().__init__(n_in=2 + (total_kv_pooling > 1), n_out=1)
+    super().__init__(n_in=1 if not prefix_lm else (2 + (total_kv_pooling > 1)),
+                     n_out=1)
     self._total_kv_pooling = total_kv_pooling
     self._max_len = max_inference_length
     self._chunk_len = chunk_len
     self._chunk_offset = chunk_offset
+    self._prefix_lm = prefix_lm
     self._n_raw_tokens_generated = n_raw_tokens_generated
     self._mode = mode
 
@@ -661,45 +667,61 @@ class AttentionMaskLayer(base.Layer):
       return mask
 
     if self._chunk_len is not None:
-      if self._total_kv_pooling > 1:
-        target_start_index = inputs[2]
+      if self._prefix_lm:
+        if self._total_kv_pooling > 1:
+          target_start_index = inputs[2]
+        else:
+          target_start_index = inputs[1]
+        assert target_start_index.shape == (batch_size,)
+        return self._create_prefix_lm_mask(target_start_index, inputs_len,
+                                           batch_size)
       else:
-        target_start_index = inputs[1]
-      assert target_start_index.shape == (batch_size,)
-
-      total_len = inputs_len
-      if self._chunk_offset != 0:
-        total_len += self._chunk_len
-      assert total_len % self._chunk_len == 0
-      n_chunks = total_len // self._chunk_len
-
-      bidirectional_mask = jnp.ones((self._chunk_len, self._chunk_len),
-                                    dtype=jnp.bool_)
-      autoregressive_mask = jnp.tril(bidirectional_mask)
-
-      chunk_indices = jnp.repeat(jnp.arange(0, n_chunks)[:, None],
-                                 repeats=batch_size,
-                                 axis=1)
-
-      chunk_boundaries = self._calculate_chunk_boundaries(target_start_index)
-      condition = jnp.array(chunk_indices < chunk_boundaries, dtype=jnp.bool_)
-
-      condition_broad = jnp.tile(condition[..., None, None],
-                                 (1, 1, self._chunk_len, self._chunk_len))
-      total_mask = jnp.where(condition_broad, bidirectional_mask,
-                             autoregressive_mask)
-
-      return total_mask.reshape(batch_size * n_chunks, 1, self._chunk_len,
-                                self._chunk_len)
+        return jnp.tril(jnp.ones((self._chunk_len, self._chunk_len),
+                                 dtype=jnp.bool_))
 
     return jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
+
+  def _create_prefix_lm_mask(self, target_start_index, inputs_len, batch_size):
+
+    total_len = inputs_len
+    if self._chunk_offset != 0:
+      total_len += self._chunk_len
+    assert total_len % self._chunk_len == 0
+    n_chunks = total_len // self._chunk_len
+
+    bidirectional_mask = jnp.ones((self._chunk_len, self._chunk_len),
+                                  dtype=jnp.bool_)
+    autoregressive_mask = jnp.tril(bidirectional_mask)
+
+    chunk_indices = jnp.repeat(jnp.arange(0, n_chunks)[:, None],
+                               repeats=batch_size,
+                               axis=1)
+
+    chunk_boundaries = self._calculate_chunk_boundaries(target_start_index)
+    is_mask_bidirectional = jnp.array(chunk_indices < chunk_boundaries,
+                                      dtype=jnp.bool_)
+    if self._chunk_offset != 0:
+      is_mask_bidirectional = fastmath.index_update(is_mask_bidirectional,
+                                                    idx=(0, slice(None, None,
+                                                                  None)),
+                                                    y=False)
+
+    condition_broad = jnp.tile(is_mask_bidirectional[..., None, None],
+                               (1, 1, self._chunk_len, self._chunk_len))
+    total_mask = jnp.where(condition_broad, bidirectional_mask,
+                           autoregressive_mask)
+
+    return total_mask.reshape(batch_size * n_chunks, 1, self._chunk_len,
+                              self._chunk_len)
 
   def _calculate_chunk_boundaries(self, target_start_idx):
     target_start_idx = (target_start_idx + self._total_kv_pooling + 1) \
                        // self._total_kv_pooling
+    print('target_start_idx: ', target_start_idx)
 
     target_start_shifted = (target_start_idx + self._chunk_offset) \
                            // self._chunk_len
+    print('target_start_shifted: ', target_start_shifted)
     return target_start_shifted
 
   def init_weights_and_state(self, input_signature):
