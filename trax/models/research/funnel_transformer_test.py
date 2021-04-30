@@ -201,6 +201,50 @@ class FunnelTransformerTest(parameterized.TestCase):
     )
     test_autoregressive_property(model_without_chunks)
 
+  def test_funnel_transformer_prefix_lm_autoregressive_property(self):
+    input_shape = (2, 12)
+    d_model = 4
+    vocab_size = 10
+    rng_1 = jax.random.PRNGKey(0)
+    rng_2 = jax.random.PRNGKey(1)
+
+    fastmath.disable_jit()
+
+    def _get_output_logits(unitialized_eval_model: tl.Layer, x):
+      input_signature = shapes.signature(x)
+      unitialized_eval_model.init(input_signature, rng=rng_1, use_cache=False)
+
+      output_logits = unitialized_eval_model(x, rng=rng_1)
+      return output_logits
+
+    def test_autoregressive_property(model, target_start_idx):
+      with fastmath.use_backend(fastmath.Backend.JAX):
+        x_1 = jax.random.randint(rng_1, input_shape, 1, vocab_size + 1)
+        x_1 = fastmath.index_update(x_1,
+                                    idx=jax.ops.index[:, target_start_idx - 1],
+                                    y=0)
+        y_1 = _get_output_logits(model, x_1)
+
+        x_2 = jax.random.randint(rng_2, input_shape, 1, vocab_size + 1)
+
+        for i in range(target_start_idx, input_shape[1]):
+          masked_x_2 = np.concatenate((x_1[:, :i], x_2[:, i:]), axis=1)
+
+          y_2 = _get_output_logits(model, masked_x_2)
+          self.assertEqual(y_2.shape[1], input_shape[1])
+          np.testing.assert_array_almost_equal(y_1[:, :i + 1], y_2[:, :i + 1])
+
+    model_chunked = ft.RelformerLM(
+        vocab_size,
+        shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
+        d_model=d_model, d_ff=d_model, n_heads=2,
+        vanilla_attn_type=tl.SelfAttention,
+        rel_chunk_len=2, vanilla_chunk_len=4,
+        prefix_lm=True,
+    )
+    for i in range(1, input_shape[1] - 1):
+      test_autoregressive_property(model_chunked, target_start_idx=i)
+
   def test_funnel_transformer_lm_forward_shape_predict(self):
     d_model = 8
     vocab_size = 4

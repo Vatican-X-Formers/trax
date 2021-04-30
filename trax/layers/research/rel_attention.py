@@ -710,18 +710,17 @@ class AttentionMaskLayer(base.Layer):
                                (1, 1, self._chunk_len, self._chunk_len))
     total_mask = jnp.where(condition_broad, bidirectional_mask,
                            autoregressive_mask)
+    total_mask = total_mask.swapaxes(0, 1)
 
     return total_mask.reshape(batch_size * n_chunks, 1, self._chunk_len,
                               self._chunk_len)
 
   def _calculate_chunk_boundaries(self, target_start_idx):
-    target_start_idx = (target_start_idx + self._total_kv_pooling + 1) \
-                       // self._total_kv_pooling
-    print('target_start_idx: ', target_start_idx)
+    target_start_idx = (target_start_idx + self._total_kv_pooling + 1
+                        ) // self._total_kv_pooling
 
-    target_start_shifted = (target_start_idx + self._chunk_offset) \
-                           // self._chunk_len
-    print('target_start_shifted: ', target_start_shifted)
+    target_start_shifted = (target_start_idx + self._chunk_offset
+                            ) // self._chunk_len
     return target_start_shifted
 
   def init_weights_and_state(self, input_signature):
