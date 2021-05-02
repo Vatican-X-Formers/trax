@@ -681,7 +681,8 @@ def ConcatenateToLMInput(pad_to_length=None):  # pylint: disable=invalid-name
   def _concatenate_to_lm_input(generator):
     for example in generator:
       if isinstance(example, (list, tuple)) and (len(example) == 2):
-        concatenated = np.concatenate((example[0], example[1]), axis=-1)
+        concatenated = np.concatenate((np.zeros_like(example[0]),
+                                       example[1]), axis=-1)
         loss_weights = np.concatenate((np.zeros_like(example[0]),
                                        np.ones_like(example[1])))
         if pad_to_length is not None:
