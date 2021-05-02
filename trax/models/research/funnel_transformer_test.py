@@ -239,7 +239,7 @@ class FunnelTransformerTest(parameterized.TestCase):
         shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
         d_model=d_model, d_ff=d_model, n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
-        rel_chunk_len=2, vanilla_chunk_len=4,
+        rel_chunk_len=None, vanilla_chunk_len=4,
         prefix_lm=True,
     )
     for i in range(1, input_shape[1] - 1):

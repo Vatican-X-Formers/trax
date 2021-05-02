@@ -684,6 +684,9 @@ class AttentionMaskLayer(base.Layer):
       self.state += self._n_raw_tokens_generated
       return mask
 
+    if self._total_kv_pooling > 1:
+      return self._create_input_only_mask(inputs[2], inputs_len)
+
     if self._chunk_len is not None:
       if self._prefix_lm:
         if self._total_kv_pooling > 1:
@@ -698,6 +701,16 @@ class AttentionMaskLayer(base.Layer):
                                  dtype=jnp.bool_))
 
     return jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
+
+  def _create_input_only_mask(self, target_start_index, inputs_len):
+    target_start_idx = (target_start_index + self._total_kv_pooling + 1
+                        ) // self._total_kv_pooling
+
+    mask_rows = (jnp.arange(inputs_len)[:, None] < target_start_idx).swapaxes(0,
+                                                                              1)
+
+    mask = jnp.expand_dims(mask_rows, 1).repeat(inputs_len, axis=1)
+    return jnp.expand_dims(mask, 1)
 
   def _create_prefix_lm_mask(self, target_start_index, inputs_len, batch_size):
 
