@@ -988,5 +988,6 @@ def RelformerLM(vocab_size,
       post_decoder_blocks,
       tl.Concatenate(),
       tl.LayerNorm(),
+      tl.Select([0], n_in=2),  # Remove target starts
       tl.Dense(vocab_size),  # vecs
   )
