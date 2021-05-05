@@ -1144,12 +1144,12 @@ def sequence_copy_inputs(
       w = np.random.randint(low=1, high=vocab_size-1,
                             size=(batch_size, w_length))
       zero = np.zeros([batch_size, 1], np.int32)
-      loss_weights = np.concatenate([np.zeros((batch_size, w_length+2)),
+      loss_weights = np.concatenate([np.zeros((batch_size, w_length+1)),
                                      np.ones((batch_size, w_length))], axis=1)
       if reverse:
-        x = np.concatenate([zero, w, zero, jnp.flip(w, axis=1)], axis=1)
+        x = np.concatenate([w, zero, jnp.flip(w, axis=1)], axis=1)
       else:
-        x = np.concatenate([zero, w, zero, w], axis=1)
+        x = np.concatenate([w, zero, w], axis=1)
       x = _pad_to_multiple_of(x, pad_to_multiple, 1)
       loss_weights = _pad_to_multiple_of(loss_weights, pad_to_multiple, 1)
       yield (x, x, loss_weights)  # Here inputs and targets are the same.
