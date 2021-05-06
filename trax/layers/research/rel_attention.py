@@ -668,7 +668,8 @@ class AttentionMaskLayer(base.Layer):
     self._mode = mode
 
   def forward(self, inputs):
-    batch_size, inputs_len = inputs[0].shape[:2]
+    inp = inputs[0] if self._prefix_lm else inputs
+    batch_size, inputs_len = inp.shape[:2]
     if self._mode == 'predict':
       # We cannot generate more than one token because it contradicts
       # all autoregressive properties
@@ -728,6 +729,7 @@ class AttentionMaskLayer(base.Layer):
                                (1, 1, self._chunk_len, self._chunk_len))
     total_mask = jnp.where(condition_broad, bidirectional_mask,
                            autoregressive_mask)
+    # TODO: insert prefixlm mask
     total_mask = total_mask.swapaxes(0, 1)
 
     return total_mask.reshape(batch_size * n_chunks, 1, self._chunk_len,
@@ -739,7 +741,9 @@ class AttentionMaskLayer(base.Layer):
 
     target_start_shifted = (target_start_idx + self._chunk_offset
                             ) // self._chunk_len
-    return target_start_shifted
+    # target_pos_in_chunk = (target_start_idx)
+
+    return target_start_shifted,
 
   def init_weights_and_state(self, input_signature):
     """Initializes this layer for fast inference, if in ``'predict'`` mode."""
