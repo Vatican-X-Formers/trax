@@ -78,6 +78,27 @@ class RelAttentionTest(absltest.TestCase):
     np.testing.assert_equal(tl.to_list(mask), [[True, False],
                                                [True, True]])
 
+  def test_prefix_lm_mask(self):
+    inputs_len, batch_size = 4, 3
+    target_start_indices = np.array([0, 2, 1, 3])
+    mask = ra.AttentionMaskLayer._prefix_lm_mask(target_start_indices,
+                                                 inputs_len)
+    tril = tl.to_list(np.tril(np.ones((inputs_len, inputs_len), dtype=np.bool)))
+
+    np.testing.assert_equal(tl.to_list(mask), [
+        tril,
+        [[True, True, False, False],
+         [True, True, False, False],
+         [True, True, True, False],
+         [True, True, True, True]],
+        tril,
+        [[True, True, True, False],
+         [True, True, True, False],
+         [True, True, True, False],
+         [True, True, True, True]],
+    ])
+
+
   def test_create_mask_layer_predict(self):
     layer = ra.AttentionMaskLayer(
         total_kv_pooling=2,

@@ -89,6 +89,7 @@ def RelativeAttentionLayer(d_feature,
                            max_inference_length=3072,
                            chunk_len=None,
                            chunk_offset=None,
+                           prefix_lm=False,
                            mode='train'):
   """Returns a layer that maps (q, k, v, masks) to (activations, masks).
 
@@ -125,6 +126,7 @@ def RelativeAttentionLayer(d_feature,
       max_inference_length=max_inference_length,
       chunk_len=chunk_len,
       chunk_offset=chunk_offset,
+      prefix_lm=prefix_lm,
       mode=mode),
 
   assert d_feature % n_heads == 0
@@ -192,6 +194,7 @@ def RelativeAttentionLMLayer(d_feature,
       max_inference_length=max_inference_length,
       chunk_len=chunk_len,
       chunk_offset=chunk_offset,
+      prefix_lm=prefix_lm,
       mode=mode)
 
   mask_layer = AttentionMaskLayer(
@@ -238,6 +241,7 @@ class RelativeAttention(base.Layer):
                max_inference_length=3072,
                chunk_len=None,
                chunk_offset=None,
+               prefix_lm=False,
                mode='train'):
     """Returns a new PureAttention instance.
 
@@ -264,6 +268,7 @@ class RelativeAttention(base.Layer):
     self._max_len = max_inference_length
     self._chunk_len = chunk_len
     self._chunk_offset = chunk_offset
+    self._prefix_lm = prefix_lm
     self._mode = mode
 
   def forward(self, inputs):
@@ -297,7 +302,8 @@ class RelativeAttention(base.Layer):
         mode=self._mode,
         rng=self.rng,
         chunk_len=self._chunk_len,
-        chunk_offset=self._chunk_offset
+        chunk_offset=self._chunk_offset,
+        prefix_lm=self._prefix_lm
     )
     if self._mode == 'viz':
       self.state = dots
@@ -371,7 +377,7 @@ class RelativeAttention(base.Layer):
 
 def DotProductAttention(queries, keys, values, pos_emb, context_bias,
                         location_bias, mask, dropout, mode, rng,
-                        chunk_len, chunk_offset):
+                        chunk_len, chunk_offset, prefix_lm):
   """Computes new activations via masked attention-weighted sum of values.
 
   This function is the core of the attention mechanism. It:
@@ -408,7 +414,7 @@ def DotProductAttention(queries, keys, values, pos_emb, context_bias,
     bd = jnp.einsum('bnid,jnd->bnij', q + location_bias, pos_emb)
 
     if mode != 'predict':
-      bd = _fast_matrix_shift(bd)
+      bd = _fast_matrix_shift(bd, is_bidirectional=prefix_lm)
 
     dots = (ac + bd) / jnp.sqrt(d_feature)
     dots = jnp.where(mask, dots, jnp.full_like(dots, -1e9))
@@ -607,7 +613,6 @@ def Sinusoidal_Embeddings(positions, d_feature):
 
 
 def _fast_matrix_shift(x, is_bidirectional=True):
-  # TODO: bidirectional parameter to switch between implementations
   # Implements necessary shift for relative positional attention calculations.
 
   if is_bidirectional:
@@ -670,6 +675,7 @@ class AttentionMaskLayer(base.Layer):
   def forward(self, inputs):
     inp = inputs[0] if self._prefix_lm else inputs
     batch_size, inputs_len = inp.shape[:2]
+
     if self._mode == 'predict':
       # We cannot generate more than one token because it contradicts
       # all autoregressive properties
@@ -685,65 +691,92 @@ class AttentionMaskLayer(base.Layer):
       self.state += self._n_raw_tokens_generated
       return mask
 
-    if self._chunk_len is not None:
-      if self._prefix_lm:
-        if self._total_kv_pooling > 1:
-          target_start_index = inputs[2]
-        else:
-          target_start_index = inputs[1]
-        assert target_start_index.shape == (batch_size,)
-        return self._create_prefix_lm_mask(target_start_index, inputs_len,
-                                           batch_size)
+    if self._prefix_lm:
+      if self._total_kv_pooling > 1:
+        target_start_index = inputs[2]
       else:
-        return jnp.tril(jnp.ones((self._chunk_len, self._chunk_len),
-                                 dtype=jnp.bool_))
+        target_start_index = inputs[1]
+      assert target_start_index.shape == (batch_size,)
 
-    return jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
+      if self._chunk_len is not None:
+        return self._chunked_prefix_lm_mask(target_start_index, inputs_len,
+                                            batch_size)
+      else:
+        target_start_index = (target_start_index + self._total_kv_pooling + 1
+                              ) // self._total_kv_pooling
+        return self._prefix_lm_mask(target_start_index, inputs_len)
+    else:
+      mask_len = inputs_len if self._chunk_len is None else self._chunk_len
+      return jnp.tril(jnp.ones((mask_len, mask_len), dtype=jnp.bool_))
 
-  def _create_prefix_lm_mask(self, target_start_index, inputs_len, batch_size):
-
+  def _chunked_prefix_lm_mask(self, target_start_index, inputs_len, batch_size):
     total_len = inputs_len
     if self._chunk_offset != 0:
       total_len += self._chunk_len
     assert total_len % self._chunk_len == 0
     n_chunks = total_len // self._chunk_len
 
-    bidirectional_mask = jnp.ones((self._chunk_len, self._chunk_len),
-                                  dtype=jnp.bool_)
-    autoregressive_mask = jnp.tril(bidirectional_mask)
-
     chunk_indices = jnp.repeat(jnp.arange(0, n_chunks)[:, None],
                                repeats=batch_size,
                                axis=1)
 
-    chunk_boundaries = self._calculate_chunk_boundaries(target_start_index)
-    is_mask_bidirectional = jnp.array(chunk_indices < chunk_boundaries,
-                                      dtype=jnp.bool_)
-    if self._chunk_offset != 0:
-      is_mask_bidirectional = fastmath.index_update(is_mask_bidirectional,
-                                                    idx=(0, slice(None, None,
-                                                                  None)),
-                                                    y=False)
+    chunk_boundaries, target_pos_in_chunk = \
+        self._calculate_chunk_boundaries(target_start_index)
 
-    condition_broad = jnp.tile(is_mask_bidirectional[..., None, None],
+    chunk_before_target = jnp.array(chunk_indices < chunk_boundaries,
+                                    dtype=jnp.bool_)
+    target_starts_in_chunk = jnp.array(chunk_indices == chunk_boundaries,
+                                       dtype=jnp.bool_)
+
+    if self._chunk_offset != 0:
+      # To prevent attending to zeros,
+      # we do not use bidirectional mask in the first chunk
+      chunk_before_target = fastmath.index_update(chunk_before_target,
+                                                  idx=(0, slice(None, None,
+                                                                None)),
+                                                  y=False)
+
+    condition_broad = jnp.tile(chunk_before_target[..., None, None],
                                (1, 1, self._chunk_len, self._chunk_len))
+
+    bidirectional_mask = jnp.ones((self._chunk_len, self._chunk_len),
+                                  dtype=jnp.bool_)
+    autoregressive_mask = jnp.tril(bidirectional_mask)
     total_mask = jnp.where(condition_broad, bidirectional_mask,
                            autoregressive_mask)
-    # TODO: insert prefixlm mask
-    total_mask = total_mask.swapaxes(0, 1)
 
+    prefix_lm_mask = self._prefix_lm_mask(target_pos_in_chunk, self._chunk_len)
+    total_mask = jnp.where(target_starts_in_chunk[..., None, None],
+                           prefix_lm_mask, total_mask)
+
+    total_mask = total_mask.swapaxes(0, 1)
     return total_mask.reshape(batch_size * n_chunks, 1, self._chunk_len,
                               self._chunk_len)
+
+  @staticmethod
+  def _prefix_lm_mask(target_start_index, inputs_len):
+    mask_rows = jnp.arange(inputs_len)[:, None] < target_start_index
+
+    mask_2d = jnp.repeat(mask_rows.T[:, None, :], inputs_len, axis=1)
+
+    tril = jnp.tril(jnp.ones((inputs_len, inputs_len), dtype=jnp.bool_))
+    return jnp.logical_or(mask_2d, tril)
 
   def _calculate_chunk_boundaries(self, target_start_idx):
     target_start_idx = (target_start_idx + self._total_kv_pooling + 1
                         ) // self._total_kv_pooling
 
-    target_start_shifted = (target_start_idx + self._chunk_offset
-                            ) // self._chunk_len
-    # target_pos_in_chunk = (target_start_idx)
+    target_start_chunk_idx = (target_start_idx + self._chunk_offset
+                              ) // self._chunk_len
 
-    return target_start_shifted,
+    if self._chunk_offset is None:
+      target_pos_in_chunk = target_start_idx % self._chunk_len
+    else:
+      shifted_pos = (target_start_idx + self._chunk_offset) % self._chunk_len
+      target_pos_in_chunk = jnp.where(target_start_chunk_idx > 0,
+                                      shifted_pos,
+                                      target_start_idx % self._chunk_len)
+    return target_start_chunk_idx, target_pos_in_chunk
 
   def init_weights_and_state(self, input_signature):
     """Initializes this layer for fast inference, if in ``'predict'`` mode."""
