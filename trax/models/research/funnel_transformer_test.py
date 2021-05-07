@@ -282,7 +282,7 @@ class FunnelTransformerTest(parameterized.TestCase):
 
     for input_target_split_token_idx_dim_1 in \
             range(left_input_target_split_token_bound,
-                  right_input_target_split_token_bound):
+                  right_input_target_split_token_bound, 4):
         input_target_split_token_idx_dim_2 = np.random.randint(
                 left_input_target_split_token_bound,
                 right_input_target_split_token_bound)
