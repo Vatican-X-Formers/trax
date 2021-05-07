@@ -73,7 +73,6 @@ class RelAttentionTest(absltest.TestCase):
     xs = np.zeros((1, 2, 5))
     layer.init(shapes.signature(xs))
     mask = layer(xs)
-    # print(mask)
     self.assertEqual(mask.shape, (2, 2))
     np.testing.assert_equal(tl.to_list(mask), [[True, False],
                                                [True, True]])
@@ -97,7 +96,6 @@ class RelAttentionTest(absltest.TestCase):
          [True, True, True, False],
          [True, True, True, True]],
     ])
-
 
   def test_create_mask_layer_predict(self):
     layer = ra.AttentionMaskLayer(
