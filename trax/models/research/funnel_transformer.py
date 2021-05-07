@@ -874,14 +874,13 @@ def RelformerLM(vocab_size,
     to activations over a vocab set.
   """
   if prefix_lm:
-    find_prefix_end = tl.Fn('FindPrefixEnd',
+    find_splitting_token_fun = tl.Fn('FindSplittingToken',
                                    lambda x: jnp.argmin(x, axis=-1))
-    shift_right = [
-      tl.Branch(None, find_prefix_end),
-      tl.ShiftRight(mode=mode)
-    ]
+    find_splitting_token = tl.Branch(None, find_splitting_token_fun),
   else:
-    shift_right = tl.ShiftRight(mode=mode)
+    find_splitting_token = []
+
+  shift_right = tl.ShiftRight(mode=mode)
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
@@ -980,6 +979,7 @@ def RelformerLM(vocab_size,
 
   # Assemble and return the model.
   return tl.Serial(  # tokens (or chunked tuple of tokens)
+      find_splitting_token,   # true for prefix_lm = True
       shift_right,
       token_encoder,  # vecs
       positional_encoder,
