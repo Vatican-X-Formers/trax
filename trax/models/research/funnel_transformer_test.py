@@ -27,7 +27,6 @@ from trax import shapes
 import trax.models.research.funnel_transformer as ft
 from trax.supervised import decoding
 
-
 class FunnelTransformerTest(parameterized.TestCase):
 
   def test_mean_pool(self):
@@ -202,13 +201,18 @@ class FunnelTransformerTest(parameterized.TestCase):
     test_autoregressive_property(model_without_chunks)
 
   def test_funnel_transformer_prefix_lm_autoregressive_property(self):
-    input_shape = (2, 12)
-    d_model = 4
-    vocab_size = 10
+    batch_size, input_length = 2, 12
+    d_model, vocab_size = 4, 10
+    input_shape = (batch_size, input_length)
+
     rng_1 = jax.random.PRNGKey(0)
     rng_2 = jax.random.PRNGKey(1)
 
     fastmath.disable_jit()
+
+    # We want at least one input token and at least one target token
+    left_input_target_split_token_bound = 1
+    right_input_target_split_token_bound = input_length - 1
 
     def _get_output_logits(unitialized_eval_model: tl.Layer, x):
       input_signature = shapes.signature(x)
@@ -217,33 +221,82 @@ class FunnelTransformerTest(parameterized.TestCase):
       output_logits = unitialized_eval_model(x, rng=rng_1)
       return output_logits
 
-    def test_autoregressive_property(model, target_start_idx):
+    def test_autoregressive_property(model, input_target_split_tokens):
       with fastmath.use_backend(fastmath.Backend.JAX):
         x_1 = jax.random.randint(rng_1, input_shape, 1, vocab_size + 1)
-        x_1 = fastmath.index_update(x_1,
-                                    idx=jax.ops.index[:, target_start_idx - 1],
-                                    y=0)
+
+        for dim, idx in enumerate(input_target_split_tokens):
+          x_1 = fastmath.index_update(x_1,
+                                      idx=jax.ops.index[dim, idx],
+                                      y=0)
+
         y_1 = _get_output_logits(model, x_1)
 
         x_2 = jax.random.randint(rng_2, input_shape, 1, vocab_size + 1)
 
-        for i in range(target_start_idx, input_shape[1]):
-          masked_x_2 = np.concatenate((x_1[:, :i], x_2[:, i:]), axis=1)
+        for dim, idx in enumerate(input_target_split_tokens):
+            for i in range(idx + 1, input_length): # because we don't wanna overwrite zero
+                modified_x1_by_x2 = fastmath.index_update(x_1,
+                                                          idx=jax.ops.index[dim, i:],
+                                                          y=x_2[dim, i:])
+                y_2 = _get_output_logits(model, modified_x1_by_x2)
 
-          y_2 = _get_output_logits(model, masked_x_2)
-          self.assertEqual(y_2.shape[1], input_shape[1])
-          np.testing.assert_array_almost_equal(y_1[:, :i + 1], y_2[:, :i + 1])
+                self.assertEqual(y_2.shape[1], input_shape[1])
+                np.testing.assert_array_almost_equal(y_1[:, :i], y_2[:, :i])
+
+    def test_encoder_capability(model, input_target_split_tokens):
+      with fastmath.use_backend(fastmath.Backend.JAX):
+        x_1 = jax.random.randint(rng_1, input_shape, 1, vocab_size + 1)
+        for dim, idx in enumerate(input_target_split_tokens):
+          x_1 = fastmath.index_update(x_1,
+                                      idx=jax.ops.index[dim, idx],
+                                      y=0)
+
+        y_1 = _get_output_logits(model, x_1)
+
+        x_2 = jax.random.randint(rng_2, input_shape, 1, vocab_size + 1)
+
+        for dim, idx in enumerate(input_target_split_tokens):
+            for i in range(idx - 1): # because we don't wanna overwrite zero
+                modified_x1_by_x2 = fastmath.index_update(x_1,
+                                                          idx=jax.ops.index[dim, :i],
+                                                          y=x_2[dim, :i])
+
+                if (x_1 == modified_x1_by_x2).all():
+                    continue
+
+                y_2 = _get_output_logits(model, modified_x1_by_x2)
+
+                self.assertEqual(y_2.shape[1], input_shape[1])
+                with np.testing.assert_raises(AssertionError):
+                    np.testing.assert_array_almost_equal(y_1[:, i+1:], y_2[:, i+1:])
 
     model_chunked = ft.RelformerLM(
-        vocab_size,
+        vocab_size + 1,
         shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
         d_model=d_model, d_ff=d_model, n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
         rel_chunk_len=2, vanilla_chunk_len=4,
         prefix_lm=True,
     )
-    for i in range(1, input_shape[1] - 1):
-      test_autoregressive_property(model_chunked, target_start_idx=i)
+
+    for input_target_split_token_idx_dim_1 in \
+            range(left_input_target_split_token_bound,
+                  right_input_target_split_token_bound):
+        input_target_split_token_idx_dim_2 = np.random.randint(
+                left_input_target_split_token_bound,
+                right_input_target_split_token_bound)
+        test_autoregressive_property(model_chunked,
+                                     input_target_split_tokens=[
+                                             input_target_split_token_idx_dim_1,
+                                             input_target_split_token_idx_dim_2
+                                     ])
+
+        test_encoder_capability(model_chunked,
+                                     input_target_split_tokens=[
+                                             input_target_split_token_idx_dim_1,
+                                             input_target_split_token_idx_dim_2
+                                     ])
 
   def test_funnel_transformer_lm_forward_shape_predict(self):
     d_model = 8
