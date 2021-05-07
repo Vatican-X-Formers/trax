@@ -116,6 +116,7 @@ def RelativeAttentionLayer(d_feature,
       chunk_len=chunk_len,
       chunk_offset=chunk_offset,
       n_raw_tokens_generated=n_raw_tokens_generated,
+      prefix_lm=prefix_lm,
       mode=mode)
 
   attention = RelativeAttention(  # pylint: disable=no-value-for-parameter
@@ -534,6 +535,7 @@ class PositionalEmbeddings(base.Layer):
                chunk_len=None,
                chunk_offset=None,
                n_raw_tokens_generated=1,
+               prefix_lm=False,
                mode='train'):
     """The init method of positional embeddings.
 
@@ -558,10 +560,12 @@ class PositionalEmbeddings(base.Layer):
     self._chunk_len = chunk_len
     self._chunk_offset = chunk_offset
     self._n_raw_tokens_generated = n_raw_tokens_generated
+    self._prefix_lm = prefix_lm
     self._mode = mode
 
   def forward(self, inputs):
-    positions = self.PositionsVectors(inputs.shape[1])
+    positions = self.PositionsVectors(inputs.shape[1],
+                                      is_bidirectional=self._prefix_lm)
     pos_emb = Sinusoidal_Embeddings(positions, self._d_feature)
     return pos_emb
 
