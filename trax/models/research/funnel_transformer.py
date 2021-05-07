@@ -777,15 +777,6 @@ class RelformerPicker(tl.Layer):
       self.state = jnp.array(0)
 
 
-class CalculateTargetStarts(tl.Layer):
-  def __init__(self):
-    super().__init__(n_in=1, n_out=1)
-
-  def forward(self, x):
-    sep_indices = jnp.argmin(x, axis=-1)
-    return sep_indices
-
-
 def PickLastTokenInPredict(mode='train'):
   """Picks the last token logits.
 
