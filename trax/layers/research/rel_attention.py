@@ -708,7 +708,9 @@ class AttentionMaskLayer(base.Layer):
       else:
         target_start_index = (target_start_index + self._total_kv_pooling + 1
                               ) // self._total_kv_pooling
-        return self._prefix_lm_mask(target_start_index, inputs_len)
+        prefix_lm_mask = self._prefix_lm_mask(target_start_index, inputs_len)
+        prefix_lm_mask = prefix_lm_mask[None, ...].swapaxes(0, 1)
+        return prefix_lm_mask
     else:
       mask_len = inputs_len if self._chunk_len is None else self._chunk_len
       return jnp.tril(jnp.ones((mask_len, mask_len), dtype=jnp.bool_))
