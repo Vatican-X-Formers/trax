@@ -848,6 +848,9 @@ def RelformerLM(vocab_size,
         will enable chunked relative attention.
     vanilla_chunk_len (optional): If set, enables chunked relative attention
         also in layers before and after shortening.
+    prefix_lm: enables bidirectional masks for the input sequence. Useful for
+        seq2seq tasks, works only if input and target are be separated by zeros,
+        like: [input 0 target].
     n_heads: Number of attention heads.
     dropout: Stochastic rate (probability) for dropping an activation value
         when applying dropout within an encoder block.
