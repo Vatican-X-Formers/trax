@@ -978,12 +978,12 @@ def RelformerLM(vocab_size,
   picker_conv = PickLastTokenInPredict(mode=mode)
 
   # Assemble and return the model.
-  return tl.Serial(  # tokens (or chunked tuple of tokens)
+  return tl.Serial(           # tokens (or chunked tuple of tokens)
       find_splitting_token,   # true for prefix_lm = True
       shift_right,
-      token_encoder,  # vecs
+      token_encoder,          # vecs
       positional_encoder,
-      pre_decoder_blocks,  # vecs
+      pre_decoder_blocks,     # vecs
       tl.Dup(),
       cacher,
       tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
@@ -999,5 +999,5 @@ def RelformerLM(vocab_size,
       picker_conv,
       post_decoder_blocks,
       tl.Select([0], n_in=2) if prefix_lm else [],  # Remove target starts
-      tl.Dense(vocab_size),  # vecs
+      tl.Dense(vocab_size),   # vecs
   )

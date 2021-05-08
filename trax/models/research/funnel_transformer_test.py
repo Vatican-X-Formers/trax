@@ -235,14 +235,16 @@ class FunnelTransformerTest(parameterized.TestCase):
         x_2 = jax.random.randint(rng_2, input_shape, 1, vocab_size + 1)
 
         for dim, idx in enumerate(input_target_split_tokens):
-            for i in range(idx + 1, input_length): # because we don't wanna overwrite zero
-                modified_x1_by_x2 = fastmath.index_update(x_1,
-                                                          idx=jax.ops.index[dim, i:],
-                                                          y=x_2[dim, i:])
-                y_2 = _get_output_logits(model, modified_x1_by_x2)
+          for i in range(idx + 1,
+                         input_length):  # we don't want to overwrite zero
+            modified_x1_by_x2 = fastmath.index_update(x_1,
+                                                      idx=jax.ops.index[dim,
+                                                          i:],
+                                                      y=x_2[dim, i:])
+            y_2 = _get_output_logits(model, modified_x1_by_x2)
 
-                self.assertEqual(y_2.shape[1], input_shape[1])
-                np.testing.assert_array_almost_equal(y_1[:, :i], y_2[:, :i])
+            self.assertEqual(y_2.shape[1], input_shape[1])
+            np.testing.assert_array_almost_equal(y_1[:, :i], y_2[:, :i])
 
     def test_encoder_capability(model, input_target_split_tokens):
       with fastmath.use_backend(fastmath.Backend.JAX):
@@ -257,19 +259,21 @@ class FunnelTransformerTest(parameterized.TestCase):
         x_2 = jax.random.randint(rng_2, input_shape, 1, vocab_size + 1)
 
         for dim, idx in enumerate(input_target_split_tokens):
-            for i in range(idx - 1): # because we don't wanna overwrite zero
-                modified_x1_by_x2 = fastmath.index_update(x_1,
-                                                          idx=jax.ops.index[dim, :i],
-                                                          y=x_2[dim, :i])
+          for i in range(idx - 1):
+            modified_x1_by_x2 = fastmath.index_update(x_1,
+                                                      idx=jax.ops.index[dim,
+                                                          :i],
+                                                      y=x_2[dim, :i])
 
-                if (x_1 == modified_x1_by_x2).all():
-                    continue
+            if (x_1 == modified_x1_by_x2).all():
+              continue
 
-                y_2 = _get_output_logits(model, modified_x1_by_x2)
+            y_2 = _get_output_logits(model, modified_x1_by_x2)
 
-                self.assertEqual(y_2.shape[1], input_shape[1])
-                with np.testing.assert_raises(AssertionError):
-                    np.testing.assert_array_almost_equal(y_1[:, i+1:], y_2[:, i+1:])
+            self.assertEqual(y_2.shape[1], input_shape[1])
+            with np.testing.assert_raises(AssertionError):
+              np.testing.assert_array_almost_equal(y_1[:, i + 1:],
+                                                   y_2[:, i + 1:])
 
     model_chunked = ft.RelformerLM(
         vocab_size + 1,
@@ -280,23 +284,23 @@ class FunnelTransformerTest(parameterized.TestCase):
         prefix_lm=True,
     )
 
-    for input_target_split_token_idx_dim_1 in \
-            range(left_input_target_split_token_bound,
-                  right_input_target_split_token_bound, 4):
-        input_target_split_token_idx_dim_2 = np.random.randint(
-                left_input_target_split_token_bound,
-                right_input_target_split_token_bound)
-        test_autoregressive_property(model_chunked,
-                                     input_target_split_tokens=[
-                                             input_target_split_token_idx_dim_1,
-                                             input_target_split_token_idx_dim_2
-                                     ])
+    for input_target_split_token_idx_dim_1 in range(
+        left_input_target_split_token_bound,
+            right_input_target_split_token_bound, 4):
+      input_target_split_token_idx_dim_2 = np.random.randint(
+          left_input_target_split_token_bound,
+          right_input_target_split_token_bound)
+      test_autoregressive_property(model_chunked,
+                                   input_target_split_tokens=[
+                                       input_target_split_token_idx_dim_1,
+                                       input_target_split_token_idx_dim_2
+                                   ])
 
-        test_encoder_capability(model_chunked,
-                                     input_target_split_tokens=[
-                                             input_target_split_token_idx_dim_1,
-                                             input_target_split_token_idx_dim_2
-                                     ])
+      test_encoder_capability(model_chunked,
+                              input_target_split_tokens=[
+                                  input_target_split_token_idx_dim_1,
+                                  input_target_split_token_idx_dim_2
+                              ])
 
   def test_funnel_transformer_lm_forward_shape_predict(self):
     d_model = 8
