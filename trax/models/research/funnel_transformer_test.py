@@ -27,7 +27,6 @@ from trax import shapes
 import trax.models.research.funnel_transformer as ft
 from trax.supervised import decoding
 
-
 class FunnelTransformerTest(parameterized.TestCase):
 
   def test_mean_pool(self):
@@ -122,38 +121,40 @@ class FunnelTransformerTest(parameterized.TestCase):
   def test_funnel_transformer_lm_forward_shape(self):
     d_model = 16
     vocab_size = 7
-    len = 48
+    length = 48
     batch_size = 3
-    x = np.ones((batch_size, len)).astype(np.int32)
+    x = np.ones((batch_size, length)).astype(np.int32)
 
     model_chunked = ft.RelformerLM(
         vocab_size,
         shorten_factor=3,
         n_rel_layers=3,
         vanilla_layers=(1, 1),
-        d_model=d_model, d_ff=d_model, n_heads=2,
+        d_model=d_model,
+        d_ff=d_model,
+        n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
         rel_chunk_len=4,
         vanilla_chunk_len=2,
-        max_len=48
-    )
+        max_len=48)
     _, _ = model_chunked.init(shapes.signature(x))
     y = model_chunked(x)
-    self.assertEqual(y.shape, (batch_size, len, vocab_size))
+    self.assertEqual(y.shape, (batch_size, length, vocab_size))
 
     model_without_chunks = ft.RelformerLM(
         vocab_size,
         shorten_factor=3,
         n_rel_layers=3,
         vanilla_layers=(1, 1),
-        d_model=d_model, d_ff=d_model, n_heads=2,
+        d_model=d_model,
+        d_ff=d_model,
+        n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
-        max_len=48
-    )
+        max_len=48)
 
     _, _ = model_without_chunks.init(shapes.signature(x))
     y = model_without_chunks(x)
-    self.assertEqual(y.shape, (batch_size, len, vocab_size))
+    self.assertEqual(y.shape, (batch_size, length, vocab_size))
 
   def test_funnel_transformer_lm_autoregressive_property(self):
     input_shape = (1, 12)
@@ -185,30 +186,45 @@ class FunnelTransformerTest(parameterized.TestCase):
 
     model_chunked = ft.RelformerLM(
         vocab_size,
-        shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
-        d_model=d_model, d_ff=4 * d_model, n_heads=2,
+        shorten_factor=3,
+        n_rel_layers=2,
+        vanilla_layers=(1, 1),
+        d_model=d_model,
+        d_ff=4 * d_model,
+        n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
-        rel_chunk_len=2, vanilla_chunk_len=4,
+        rel_chunk_len=2,
+        vanilla_chunk_len=4,
     )
     test_autoregressive_property(model_chunked)
 
     model_without_chunks = ft.RelformerLM(
         vocab_size,
-        shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
-        d_model=d_model, d_ff=4 * d_model, n_heads=2,
+        shorten_factor=3,
+        n_rel_layers=2,
+        vanilla_layers=(1, 1),
+        d_model=d_model,
+        d_ff=4 * d_model,
+        n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
-        rel_chunk_len=None, vanilla_chunk_len=None,
+        rel_chunk_len=None,
+        vanilla_chunk_len=None,
     )
     test_autoregressive_property(model_without_chunks)
 
   def test_funnel_transformer_prefix_lm_autoregressive_property(self):
-    input_shape = (2, 12)
-    d_model = 4
-    vocab_size = 10
+    batch_size, input_length = 2, 12
+    d_model, vocab_size = 4, 10
+    input_shape = (batch_size, input_length)
+
     rng_1 = jax.random.PRNGKey(0)
     rng_2 = jax.random.PRNGKey(1)
 
     fastmath.disable_jit()
+
+    # We want at least one input token and at least one target token
+    left_input_target_split_token_bound = 1
+    right_input_target_split_token_bound = input_length - 1
 
     def _get_output_logits(unitialized_eval_model: tl.Layer, x):
       input_signature = shapes.signature(x)
@@ -217,33 +233,86 @@ class FunnelTransformerTest(parameterized.TestCase):
       output_logits = unitialized_eval_model(x, rng=rng_1)
       return output_logits
 
-    def test_autoregressive_property(model, target_start_idx):
+    def test_autoregressive_property(model, input_target_split_tokens):
       with fastmath.use_backend(fastmath.Backend.JAX):
         x_1 = jax.random.randint(rng_1, input_shape, 1, vocab_size + 1)
-        x_1 = fastmath.index_update(x_1,
-                                    idx=jax.ops.index[:, target_start_idx - 1],
-                                    y=0)
+
+        for dim, idx in enumerate(input_target_split_tokens):
+          x_1 = fastmath.index_update(x_1,
+                                      idx=jax.ops.index[dim, idx],
+                                      y=0)
+
         y_1 = _get_output_logits(model, x_1)
 
         x_2 = jax.random.randint(rng_2, input_shape, 1, vocab_size + 1)
 
-        for i in range(target_start_idx, input_shape[1]):
-          masked_x_2 = np.concatenate((x_1[:, :i], x_2[:, i:]), axis=1)
+        for dim, idx in enumerate(input_target_split_tokens):
+          for i in range(idx + 1,
+                         input_length):  # we don't want to overwrite zero
+            modified_x1_by_x2 = fastmath.index_update(x_1,
+                                                      idx=jax.ops.index[dim,
+                                                          i:],
+                                                      y=x_2[dim, i:])
+            y_2 = _get_output_logits(model, modified_x1_by_x2)
 
-          y_2 = _get_output_logits(model, masked_x_2)
-          self.assertEqual(y_2.shape[1], input_shape[1])
-          np.testing.assert_array_almost_equal(y_1[:, :i + 1], y_2[:, :i + 1])
+            self.assertEqual(y_2.shape[1], input_shape[1])
+            np.testing.assert_array_almost_equal(y_1[:, :i], y_2[:, :i])
+
+    def test_encoder_capability(model, input_target_split_tokens):
+      with fastmath.use_backend(fastmath.Backend.JAX):
+        x_1 = jax.random.randint(rng_1, input_shape, 1, vocab_size + 1)
+        for dim, idx in enumerate(input_target_split_tokens):
+          x_1 = fastmath.index_update(x_1,
+                                      idx=jax.ops.index[dim, idx],
+                                      y=0)
+
+        y_1 = _get_output_logits(model, x_1)
+
+        x_2 = jax.random.randint(rng_2, input_shape, 1, vocab_size + 1)
+
+        for dim, idx in enumerate(input_target_split_tokens):
+          for i in range(idx - 1):
+            modified_x1_by_x2 = fastmath.index_update(x_1,
+                                                      idx=jax.ops.index[dim,
+                                                          :i],
+                                                      y=x_2[dim, :i])
+
+            if (x_1 == modified_x1_by_x2).all():
+              continue
+
+            y_2 = _get_output_logits(model, modified_x1_by_x2)
+
+            self.assertEqual(y_2.shape[1], input_shape[1])
+            with np.testing.assert_raises(AssertionError):
+              np.testing.assert_array_almost_equal(y_1[:, i + 1:],
+                                                   y_2[:, i + 1:])
 
     model_chunked = ft.RelformerLM(
-        vocab_size,
+        vocab_size + 1,
         shorten_factor=3, n_rel_layers=2, vanilla_layers=(1, 1),
         d_model=d_model, d_ff=d_model, n_heads=2,
         vanilla_attn_type=tl.SelfAttention,
         rel_chunk_len=2, vanilla_chunk_len=4,
         prefix_lm=True,
     )
-    for i in range(1, input_shape[1] - 1):
-      test_autoregressive_property(model_chunked, target_start_idx=i)
+
+    for input_target_split_token_idx_dim_1 in range(
+        left_input_target_split_token_bound,
+            right_input_target_split_token_bound, 4):
+      input_target_split_token_idx_dim_2 = np.random.randint(
+          left_input_target_split_token_bound,
+          right_input_target_split_token_bound)
+      test_autoregressive_property(model_chunked,
+                                   input_target_split_tokens=[
+                                       input_target_split_token_idx_dim_1,
+                                       input_target_split_token_idx_dim_2
+                                   ])
+
+      test_encoder_capability(model_chunked,
+                              input_target_split_tokens=[
+                                  input_target_split_token_idx_dim_1,
+                                  input_target_split_token_idx_dim_2
+                              ])
 
   def test_funnel_transformer_lm_forward_shape_predict(self):
     d_model = 8
@@ -267,7 +336,9 @@ class FunnelTransformerTest(parameterized.TestCase):
         shorten_factor=shorten_factor,
         n_rel_layers=n_rel_layers,
         vanilla_layers=vanilla_layers,
-        d_model=d_model, d_ff=d_model, n_heads=n_heads,
+        d_model=d_model,
+        d_ff=d_model,
+        n_heads=n_heads,
         vanilla_attn_type=attention_type,
         rel_chunk_len=rel_chunk_len,
         vanilla_chunk_len=vanilla_chunk_len,
@@ -282,6 +353,7 @@ class FunnelTransformerTest(parameterized.TestCase):
     gin.clear_config()
 
   def test_funnel_transformer_lm_predict_eval_equal(self):
+
     def _test_for_chunk_lens(rel_chunk_len, vanilla_chunk_len):
       d_model = 8
       vocab_size = 4
@@ -299,20 +371,22 @@ class FunnelTransformerTest(parameterized.TestCase):
           shorten_factor=shorten_factor,
           n_rel_layers=n_rel_layers,
           vanilla_layers=vanilla_layers,
-          d_model=d_model, d_ff=d_model, n_heads=n_heads,
+          d_model=d_model,
+          d_ff=d_model,
+          n_heads=n_heads,
           vanilla_attn_type=attention_type,
           rel_chunk_len=rel_chunk_len,
           vanilla_chunk_len=vanilla_chunk_len,
           mode='eval')
 
-      input = jax.random.randint(key=jax.random.PRNGKey(0),
-                                 minval=0,
-                                 maxval=vocab_size,
-                                 shape=(batch_size, n_len_eval)).astype(
-        np.int32)
-      _, _ = eval_funnel.init(shapes.signature(input),
-                              rng=jax.random.PRNGKey(0))
-      y_eval = eval_funnel(input)
+      inputs = jax.random.randint(
+          key=jax.random.PRNGKey(0),
+          minval=0,
+          maxval=vocab_size,
+          shape=(batch_size, n_len_eval)).astype(np.int32)
+      _, _ = eval_funnel.init(
+          shapes.signature(inputs), rng=jax.random.PRNGKey(0))
+      y_eval = eval_funnel(inputs)
       self.assertEqual(y_eval.shape, (batch_size, n_len_eval, vocab_size))
 
       if attention_type == tl.SelfAttention:
@@ -323,23 +397,28 @@ class FunnelTransformerTest(parameterized.TestCase):
           shorten_factor=shorten_factor,
           n_rel_layers=n_rel_layers,
           vanilla_layers=vanilla_layers,
-          d_model=d_model, d_ff=d_model, n_heads=n_heads,
+          d_model=d_model,
+          d_ff=d_model,
+          n_heads=n_heads,
           vanilla_attn_type=attention_type,
           rel_chunk_len=rel_chunk_len,
           vanilla_chunk_len=vanilla_chunk_len,
           mode='predict')
 
-      input = np.concatenate(
-          [np.zeros((batch_size, 1)).astype(np.int32), input], axis=1)
-      input = input[:, :-1]
+      inputs = np.concatenate(
+          [np.zeros((batch_size, 1)).astype(np.int32), inputs], axis=1)
+      inputs = inputs[:, :-1]
 
-      _, _ = predict_funnel.init(shapes.signature(input[:, 0:1]),
-                                 rng=jax.random.PRNGKey(0), use_cache=False)
+      _, _ = predict_funnel.init(
+          shapes.signature(inputs[:, 0:1]),
+          rng=jax.random.PRNGKey(0),
+          use_cache=False)
 
       for i in range(n_len_eval):
-        y = predict_funnel(input[:, i:i + 1])
-        np.testing.assert_array_almost_equal(y, y_eval[:, i:i + 1, :],
-                                             decimal=5)
+        y = predict_funnel(inputs[:, i:i + 1])
+        np.testing.assert_array_almost_equal(
+            y, y_eval[:, i:i + 1, :], decimal=5)
+
     _test_for_chunk_lens(rel_chunk_len=None, vanilla_chunk_len=None)
     _test_for_chunk_lens(rel_chunk_len=2, vanilla_chunk_len=6)
 
