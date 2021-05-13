@@ -817,6 +817,7 @@ def RelformerLM(vocab_size,
                 n_rel_layers=6,
                 rel_chunk_len=None,
                 vanilla_chunk_len=None,
+                last_full_layers=0,
                 n_heads=8,
                 dropout=0.1,
                 dropout_shared_axes=None,
@@ -912,6 +913,12 @@ def RelformerLM(vocab_size,
         chunk_offset = (layer_number % 2) * (layer_chunk_len // 2)
       else:
         chunk_offset = None
+
+      if force_relative and n_layers - layer_number <= last_full_layers:
+        chunk_len = None
+        chunk_offset = None
+      else:
+        chunk_len = layer_chunk_len
 
       return functools.partial(
           RelativeAttentionWrapper,
