@@ -248,10 +248,7 @@ def for_n_devices(x, n_devices):
 
 def on_cpu(x):
   """Puts ``x`` in CPU memory in JAX."""
-  if fastmath.is_backend(fastmath.Backend.JAX):
-    return jax.device_put(x, jax.devices('cpu')[0])
-  else:
-    return x
+  return jax.device_put(x, jax.devices('cpu')[0])
 
 
 def on_accelerator(x):
