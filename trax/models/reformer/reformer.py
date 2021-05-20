@@ -257,13 +257,9 @@ def ReformerShortenLM(vocab_size,
   """
   assert mode != 'predict'  # TODO(lukaszkaiser,kitaev): fast inference
 
-  positional_encoding = ct.PositionalEncoder(
-      mode, dropout, max_len, pos_type, pos_axial_shape, pos_d_axial_embs)
-
   positional_embedder = [
       tl.Embedding(vocab_size, d_embedding),
       tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),  # pylint: disable=no-value-for-parameter
-      positional_encoding,
   ]
 
   decoder_blocks = []
@@ -315,7 +311,6 @@ def ReformerShortenLM(vocab_size,
       tl.Concatenate(),  # Concatenate with just the embeddings.
       tl.CausalConv(d_embedding),
       tl.Relu(),
-      tl.SRU(d_embedding),  # One RNN layer for conditional dependence.
       tl.Dense(vocab_size),
   )
   # pylint: enable=g-long-lambda
