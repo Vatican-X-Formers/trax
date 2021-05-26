@@ -820,7 +820,9 @@ def RelformerLM(vocab_size,
                 prefix_lm=False,
                 last_full_layers=0,
                 n_heads=8,
-                dropout=0.1,
+                dropatt=0.0,
+                ff_dropout=0.0,
+                emb_dropout=0.0,
                 dropout_shared_axes=None,
                 vanilla_attn_type=tl.LSHSelfAttention,
                 pos_type='fixed-base',
@@ -899,10 +901,10 @@ def RelformerLM(vocab_size,
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
-      tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
+      tl.Dropout(rate=emb_dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
   if vanilla_chunk_len is None:
-    positional_encoder = PositionalEncoder(mode, dropout, max_len, pos_type)
+    positional_encoder = PositionalEncoder(mode, emb_dropout, max_len, pos_type)
   else:
     positional_encoder = []
 
@@ -955,9 +957,9 @@ def RelformerLM(vocab_size,
               d_per_head,
               n_heads,
               layer_attn_type,
-              dropout,
+              dropatt,
               ff_activation,
-              dropout,
+              ff_dropout,
               ff_use_sru=0,
               ff_chunk_size=0,
               ff_sparsity=0,
