@@ -58,6 +58,7 @@ def RelformerLM(vocab_size,
                 dropout=0.1,
                 dropout_shared_axes=None,
                 vanilla_attn_type=tl.SelfAttention,
+                relative_in_vanilla=False,
                 pos_type='fixed-base',
                 max_len=3072,
                 n_raw_tokens_generated=1,
@@ -68,7 +69,7 @@ def RelformerLM(vocab_size,
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
-  if vanilla_chunk_len is None:
+  if vanilla_chunk_len is None and vanilla_attn_type == tl.SelfAttention:
     positional_encoder = PositionalEncoder(mode, dropout, max_len, pos_type)
   else:
     positional_encoder = []
@@ -139,7 +140,8 @@ def RelformerLM(vocab_size,
     ]
 
   pre_decoder_blocks = create_reformer_blocks(
-      n_pre_decoder_blocks, layer_chunk_len=vanilla_chunk_len)
+      n_pre_decoder_blocks, layer_chunk_len=vanilla_chunk_len,
+      force_relative=relative_in_vanilla)
 
   relative_decoder_blocks = create_reformer_blocks(
       n_rel_layers,
@@ -153,11 +155,11 @@ def RelformerLM(vocab_size,
   )
 
   post_decoder_blocks = create_reformer_blocks(
-      n_post_decoder_blocks, layer_chunk_len=vanilla_chunk_len, dense=False)
+      n_post_decoder_blocks, layer_chunk_len=vanilla_chunk_len, dense=False,
+      force_relative=relative_in_vanilla)
 
   if n_rel_layers > 0:
     funnel_part_of_model = [
-        tl.Dup(),
         tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
         _DownsamplerLM(shorten_factor, d_model),
         relative_decoder_blocks,
