@@ -925,7 +925,7 @@ def RelformerLM(vocab_size,
           n_raw_tokens_generated=n_raw_tokens_generated,
           max_inference_length=max_len,
           total_kv_pooling=total_kv_pooling,
-          chunk_len=layer_chunk_len,
+          chunk_len=chunk_len,
           chunk_offset=chunk_offset)
 
     d_per_head = d_model // n_heads
