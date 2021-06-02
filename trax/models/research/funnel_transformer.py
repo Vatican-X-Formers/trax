@@ -19,17 +19,13 @@
 Funnel-Transformer: Filtering out Sequential Redundancy for Efficient
 Language Processing https://arxiv.org/abs/2006.03236
 """
-import functools
-
-from trax import fastmath
 from trax import layers as tl
 from trax.fastmath import numpy as jnp
 from trax.fastmath.ops import index_add
+from trax.layers import core
+from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer
-from trax.layers.research.rel_attention import RelativeAttentionWrapper
-from trax.models.reformer.reformer import DecoderBlock
-from trax.models.research.configurable_transformer import PositionalEncoder
 from trax.models.transformer import _EncoderBlock
 from trax.models.transformer import _FeedForwardBlock
 
@@ -171,9 +167,7 @@ def _FunnelBlock(d_model, d_ff, n_heads,
           hidden_dropout                            # attn, mask'
       ),                                            # funnel_activations, mask'
       tl.Residual(
-          tl.LayerNorm(),
-          feed_forward,
-          hidden_dropout,
+          feed_forward
       )
   ]
 
@@ -419,57 +413,52 @@ def FunnelTransformer(vocab_size,
   )
 
 
-def _RelativeDecoderBlock(d_model,
-                          d_ff,
-                          n_heads,
-                          dropout,
-                          dropout_shared_axes,
-                          mode,
-                          ff_activation,
-                          total_pooling,
-                          max_inference_length=3072,
-                          rel_chunk_len=None,
-                          chunk_offset=None):
-  """Returns a list of layers that implements a Transformer encoder block.
+def _get_rel_att_inputs(d_model, n_heads):
+  # Global relative attentions bias initialization shared across the layers
+  assert d_model % n_heads == 0 and d_model % 2 == 0
+  d_head = d_model // n_heads
 
+  bias_initializer = init.RandomNormalInitializer(1e-6)
+  context_bias_layer = core.Weights(bias_initializer,
+                                    shape=(1, n_heads, 1, d_head))
+  location_bias_layer = core.Weights(bias_initializer,
+                                     shape=(1, n_heads, 1, d_head))
+  return context_bias_layer, location_bias_layer
+
+
+def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
+                          mode, ff_activation, context_bias_layer,
+                          location_bias_layer, total_pooling):
+  """Returns a list of layers that implements a Transformer encoder block.
   The input to the block is a pair, (activations, mask), where the mask was
   created from the original source tokens to prevent attending to the padding
   part of the input.
-
   Args:
     d_model: Final dimension of tensors at most points in the model, including
-      the initial embedding output.
+        the initial embedding output.
     d_ff: Size of special dense layer in the feed-forward part of each block.
     n_heads: Number of attention heads.
     dropout: Stochastic rate (probability) for dropping an activation value
-      when applying dropout within a block.
+        when applying dropout within a block.
     dropout_shared_axes: Tensor axes on which to share a dropout mask.
-      Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
-      a useful way to save memory and apply consistent masks to activation
-      vectors at different sequence positions.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
     mode: If `'train'`, each block will include dropout; else, it will
-      pass all values through unaltered.
+        pass all values through unaltered.
     ff_activation: Type of activation function at the end of each block; must
-      be an activation-type subclass of `Layer`.
+        be an activation-type subclass of `Layer`.
+    context_bias_layer: Global context bias from Transformer XL's attention.
+    location_bias_layer: Global location bias from Transformer XL's attention.
     total_pooling: The combined pool size of previously used funnel blocks.
-    max_inference_length: The maximum inference length.
-    rel_chunk_len: Number of tokens per chunk. Setting this option will enable
-      chunked attention.
-    chunk_offset: Offset for shifting chunks, for shifted chunked attention.
-
   Returns:
     A list of layers that maps (activations, att_vecs, mask) to
                                (activations, att_vecs, mask).
   """
   attention = RelativeAttentionLMLayer(
-      d_model,
+      d_model, context_bias_layer, location_bias_layer,
       total_pooling,
-      n_heads=n_heads,
-      dropout=dropout,
-      max_inference_length=max_inference_length,
-      chunk_len=rel_chunk_len,
-      chunk_offset=chunk_offset,
-      mode=mode)
+      n_heads=n_heads, dropout=dropout, mode=mode)
 
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
@@ -490,62 +479,41 @@ def _RelativeDecoderBlock(d_model,
   ]
 
 
-def _UpsamplerLM(shorten_factor, d_model):
-  return tl.Serial(
-      tl.Dense(shorten_factor * d_model),
-      tl.Fn(
-          'ProlongBack',
-          lambda x: jnp.reshape(  # Prolong back.  # pylint: disable=g-long-lambda
-              x, (x.shape[0], x.shape[1] * shorten_factor, -1)),
-          n_out=1),
-  )
-
-
-def _DownsamplerLM(shorten_factor, d_model):
-  return tl.Serial(
-      tl.Fn(
-          'Shorten',
-          lambda x: jnp.reshape(  # Shorten -- move to depth.  # pylint: disable=g-long-lambda
-              x, (x.shape[0], x.shape[1] // shorten_factor, -1)),
-          n_out=1),
-      tl.Dense(d_model))
-
-
 def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes, mode, ff_activation,
-                                total_pooling, shorten_factor, resampler_fn):
+                                context_bias_layer, location_bias_layer,
+                                total_pooling, shorten_factor, is_upsampling):
   """Returns a list of layers that implements a Transformer decoder block.
 
   The input is an activation tensor.
 
   Args:
     d_model: Final dimension of tensors at most points in the model, including
-      the initial embedding output.
+        the initial embedding output.
     d_ff: Size of special dense layer in the feed-forward part of each block.
     n_heads: Number of attention heads.
     dropout: Stochastic rate (probability) for dropping an activation value
-      when applying dropout within a block.
+        when applying dropout within a block.
     dropout_shared_axes: Tensor axes on which to share a dropout mask.
-      Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
-      a useful way to save memory and apply consistent masks to activation
-      vectors at different sequence positions.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
     mode: If `'train'`, each block will include dropout; else, it will
-      pass all values through unaltered.
+        pass all values through unaltered.
     ff_activation: Type of activation function at the end of each block; must
-      be an activation-type subclass of `Layer`.
-    total_pooling: total pooling.
+        be an activation-type subclass of `Layer`.
     shorten_factor: by how much shorten/upsample at this funnel block.
     resampler_fn: Type of function that performs funnel upsampling/downsampling;
-      callable with signature: shorten_factor, d_model;  must return an
-      activation-type subclass of `Layer`.
+        callable with signature: shorten_factor, d_model;  must return an
+         activation-type subclass of `Layer`.
 
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
-  resampler = resampler_fn(shorten_factor, d_model)
-
   attention = RelativeAttentionLMLayer(
-      d_model, total_pooling, n_heads=n_heads, dropout=dropout, mode=mode)
+      d_model, context_bias_layer, location_bias_layer,
+      total_pooling, n_heads=n_heads, dropout=dropout,
+      mode=mode)
 
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
@@ -553,12 +521,16 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
+  pooling = tl.AvgPool(pool_size=(shorten_factor,), strides=(shorten_factor,)) \
+    if not is_upsampling else []
+
   return [
       tl.LayerNorm(),            # h
       tl.Branch(tl.Serial(
-          resampler,
+          pooling,
           tl.LayerNorm(),
       ), None),                  # h', h
+      tl.Select([2, 1, 2]) if is_upsampling else [],
       tl.Residual(
           tl.Select([0, 1, 1]),  # h', h, h
           attention,
@@ -604,20 +576,21 @@ def FunnelTransformerLM(vocab_size,
         the initial embedding output.
     d_ff: Size of special dense layer in the feed-forward part of each encoder
         block.
+    n_heads: Number of attention heads.
     vanilla_layers: (pre_layers, post_layers) tuple - number of full token-level
         Transformer decoder layers before and after shortening.
     shorten_factors: by how much to shorten at each step - tuple of arbitrary
-        length denoting by how much shorten at each pooling stage.
+        length denoting by how much shorten at each pooling stage
     n_funnel_blocks: number of Transformer decoder blocks after each stage of
-        pooling - tuple of the same length as `shorten_factors`.
-    n_heads: Number of attention heads.
+        pooling - tuple of the same length as `shorten_factors`
     dropout: Stochastic rate (probability) for dropping an activation value
         when applying dropout within an encoder block.
     dropout_shared_axes: Tensor axes on which to share a dropout mask.
         Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
         a useful way to save memory and apply consistent masks to activation
         vectors at different sequence positions.
-    mode: str: 'train' or 'eval'.
+    mode: If `'predict'`, use fast inference. If `'train'`, each encoder block
+        will include dropout; else, it will pass all values through unaltered.
     ff_activation: Type of activation function at the end of each encoder
         block; must be an activation-type subclass of `Layer`.
 
@@ -625,27 +598,30 @@ def FunnelTransformerLM(vocab_size,
     A Transformer language model as a layer that maps from a tensor of tokens
     to activations over a vocab set.
   """
-  assert mode != 'predict'  # For now, 'predict' mode is unsupported.
   assert len(n_funnel_blocks) == len(shorten_factors)
 
   token_encoder = [
       tl.Embedding(vocab_size, d_model),
       tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
 
+  context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
+                                                                n_heads)
+
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
-  def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
+  def create_decoder_blocks(n_layers, total_pooling):
     decoder_blocks = [
         # pylint: disable=g-complex-comprehension
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                               dropout_shared_axes, mode, ff_activation,
+                              context_bias_layer, location_bias_layer,
                               total_pooling)
         for _ in range(n_layers)]
     return decoder_blocks + [tl.LayerNorm()]
 
   total_pooling_acc = 1
   pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
-                                             total_pooling=1)
+                                             total_pooling_acc)
 
   funnel_blocks = []
 
@@ -654,9 +630,11 @@ def FunnelTransformerLM(vocab_size,
         d_model, d_ff, n_heads, dropout,
         dropout_shared_axes, mode,
         ff_activation,
+        context_bias_layer=context_bias_layer,
+        location_bias_layer=location_bias_layer,
         total_pooling=total_pooling_acc,
         shorten_factor=shorten_factor,
-        resampler_fn=_DownsamplerLM)]
+        is_upsampling=False)]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
@@ -665,17 +643,13 @@ def FunnelTransformerLM(vocab_size,
       d_model, d_ff, n_heads, dropout,
       dropout_shared_axes, mode,
       ff_activation,
+      context_bias_layer=context_bias_layer,
+      location_bias_layer=location_bias_layer,
       total_pooling=total_pooling_acc,
       shorten_factor=total_pooling_acc,
-      resampler_fn=_UpsamplerLM)
+      is_upsampling=True)
 
-  conv_layer = tl.Serial(
-      tl.CausalConv(d_model, total_pooling_acc),
-      ff_activation()
-  )
-
-  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
-                                              total_pooling=1)
+  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
@@ -685,338 +659,9 @@ def FunnelTransformerLM(vocab_size,
       tl.Dup(),
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
       funnel_blocks,
-      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       upsampling_layer,
       tl.LayerNorm(),
-      tl.Concatenate(),
-      conv_layer,
+      tl.Add(),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
-  )
-
-
-class RelformerCacher(tl.Layer):
-  """Cache for Relformer.
-
-  A class for caching tokens going through model to provide fast inference
-  for Relformer model.
-  """
-
-  def __init__(self,
-               total_kv_pooling,
-               n_raw_tokens_generated=1,
-               max_inference_length=64 * 64 * 3,
-               shift=0,
-               sliding=False,
-               mode='train'):
-    super().__init__(n_in=1, n_out=1)
-    self._total_kv_pooling = total_kv_pooling
-    self._n_raw_tokens_generated = n_raw_tokens_generated
-    self._max_len = max_inference_length
-    self._shift = shift
-    self._sliding = sliding
-    self._mode = mode
-
-  def forward(self, inputs):
-    if self._mode != 'predict':
-      return inputs
-    return self.update_state(inputs=inputs)
-
-  def init_weights_and_state(self, input_signature):
-    if self._mode == 'predict':
-      shape, dtype = input_signature.as_tuple()
-      batch_size, _, d_feature = shape
-      cache = jnp.zeros((batch_size, 2 * self._total_kv_pooling, d_feature),
-                        dtype=dtype)
-      self.state = cache, jnp.array(0)
-
-  def update_state(self, inputs):
-    cache, idx = self.state
-    cache = fastmath.dynamic_update_slice_in_dim(
-        cache,
-        inputs, (idx + self._shift) % (2 * self._total_kv_pooling),
-        axis=1)
-
-    if self._sliding:
-      cache = fastmath.dynamic_update_slice_in_dim(
-          cache,
-          inputs,
-          (idx + self._total_kv_pooling * 2 - 1) % (2 * self._total_kv_pooling),
-          axis=1)
-
-    if self._sliding:
-      left_index = idx % self._total_kv_pooling
-    else:
-      left_index = (idx -
-                    (idx % self._total_kv_pooling)) % (2 *
-                                                       self._total_kv_pooling)
-
-    output = fastmath.dynamic_slice(
-        cache, [0, left_index, 0],
-        [cache.shape[0], self._total_kv_pooling, cache.shape[2]])
-
-    self.state = cache, idx + self._n_raw_tokens_generated
-    return output
-
-
-class RelformerPicker(tl.Layer):
-  """Relformer Picker.
-
-  A class for picking tokens going through model to provide fast inference
-  for Relformer model.
-  """
-
-  def __init__(self, total_kv_pooling, n_raw_tokens_generated=1, mode='train'):
-    super().__init__(n_in=1, n_out=1)
-    self._total_kv_pooling = total_kv_pooling
-    self._n_raw_tokens_generated = n_raw_tokens_generated
-    self._mode = mode
-
-  def forward(self, inputs):
-    if self._mode != 'predict':
-      return inputs
-
-    output = fastmath.dynamic_slice(
-        inputs, [0, self.state, 0],
-        [inputs.shape[0], self._n_raw_tokens_generated, inputs.shape[2]])
-    self.state = (self.state +
-                  self._n_raw_tokens_generated) % self._total_kv_pooling
-    return output
-
-  def init_weights_and_state(self, input_signature):
-    if self._mode == 'predict':
-      self.state = jnp.array(0)
-
-
-def PickLastTokenInPredict(mode='train'):
-  """Picks the last token logits.
-
-  Self-descriptive layer for picking the last token logits in predict mode
-  for fast inference.
-
-  Args:
-    mode: the model mode (train, predict, ...)
-
-  Returns:
-    The last token logits.
-  """
-
-  def last_token(x):  # pylint: disable=invalid-name
-    if mode == 'predict':
-      return x[:, -1:, :]
-    return x
-
-  return tl.Fn('Pick last token in predict', last_token)
-
-
-def RelformerLM(vocab_size,
-                d_model=512,
-                d_ff=2048,
-                vanilla_layers=(1, 1),
-                shorten_factor=3,
-                n_rel_layers=6,
-                rel_chunk_len=None,
-                vanilla_chunk_len=None,
-                last_full_layers=0,
-                n_heads=8,
-                dropout=0.1,
-                dropout_shared_axes=None,
-                vanilla_attn_type=tl.LSHSelfAttention,
-                pos_type='fixed-base',
-                max_len=3072,
-                n_raw_tokens_generated=1,
-                mode='train',
-                ff_activation=tl.FastGelu):
-  """Returns a Transformer language model.
-
-  This model performs autoregressive language modeling:
-
-    - input: rank 2 tensor representing a batch of text strings via token IDs
-      plus padding markers; shape is (batch_size, sequence_length). The tensor
-      elements are integers in `range(vocab_size)`, and `0` values mark padding
-      positions.
-
-    - output: rank 3 tensor representing a batch of log-probability
-      distributions for each sequence position over possible token IDs;
-      shape is (batch_size, sequence_length, `vocab_size`).
-
-  This model uses only the decoder part of the overall Transformer.
-
-  Args:
-    vocab_size: Input vocabulary size -- each element of the input tensor
-        should be an integer in `range(vocab_size)`. These integers typically
-        represent token IDs from a vocabulary-based tokenizer.
-    d_model: Final dimension of tensors at most points in the model, including
-        the initial embedding output.
-    d_ff: Size of special dense layer in the feed-forward part of each encoder
-        block.
-    vanilla_layers: (pre_layers, post_layers) tuple - number of full token-level
-        Transformer decoder layers before and after shortening.
-    shorten_factor: by how much to shorten
-    n_rel_layers: number of Transformer blocks after the pooling. These blocks
-        use relative attention.
-    rel_chunk_len (optional): Number of tokens per chunk. Setting this option
-        will enable chunked relative attention.
-    vanilla_chunk_len (optional): If set, enables chunked relative attention
-        also in layers before and after shortening.
-    n_heads: Number of attention heads.
-    dropout: Stochastic rate (probability) for dropping an activation value
-        when applying dropout within an encoder block.
-    dropout_shared_axes: Tensor axes on which to share a dropout mask.
-        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
-        a useful way to save memory and apply consistent masks to activation
-        vectors at different sequence positions.
-    vanilla_attn_type: class: attention class such as SelfAttention to use in
-        the layers before and after shortening (vanilla layers).
-    pos_type: string, the type of positional embeddings to use.
-    max_len: int: maximum symbol length both for positional encoding and it is
-      also the maximum length of the possible inference in 'predict' mode
-    n_raw_tokens_generated: int: number of tokens generated with every pass
-      through model in 'predict' mode. Number of tokens should be smaller and
-      divisible by the first shorten factor we are using in the model.
-      It cannot be larger than one if we use vanilla layers because we would
-      lose autoregressive property of the model.
-    mode: str: 'train' or 'eval' or 'predict'.
-    ff_activation: Type of activation function at the end of each encoder
-        block; must be an activation-type subclass of `Layer`.
-
-  Returns:
-    A Transformer language model as a layer that maps from a tensor of tokens
-    to activations over a vocab set.
-  """
-
-  token_encoder = [
-      tl.Embedding(vocab_size, d_model),
-      tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
-
-  if vanilla_chunk_len is None:
-    positional_encoder = PositionalEncoder(mode, dropout, max_len, pos_type)
-  else:
-    positional_encoder = []
-
-  n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
-
-  def create_reformer_blocks(  # pylint: disable=invalid-name
-      n_layers,
-      total_kv_pooling=1,
-      layer_chunk_len=None,
-      force_relative=False,
-      dense=True):
-    if n_layers == 0:
-      return [tl.LayerNorm()]
-
-    def determine_attn_type(layer_number):  # pylint: disable=invalid-name
-      if layer_chunk_len is None and not force_relative:
-        return vanilla_attn_type
-
-      if layer_chunk_len is not None:
-        chunk_offset = (layer_number % 2) * (layer_chunk_len // 2)
-      else:
-        chunk_offset = None
-
-      if force_relative and n_layers - layer_number <= last_full_layers:
-        chunk_len = None
-        chunk_offset = None
-      else:
-        chunk_len = layer_chunk_len
-
-      return functools.partial(
-          RelativeAttentionWrapper,
-          n_raw_tokens_generated=n_raw_tokens_generated,
-          max_inference_length=max_len,
-          total_kv_pooling=total_kv_pooling,
-          chunk_len=chunk_len,
-          chunk_offset=chunk_offset)
-
-    d_per_head = d_model // n_heads
-
-    decoder_blocks = []
-    for i in range(n_layers):
-      layer_attn_type = determine_attn_type(i)
-
-      decoder_blocks.append(
-          DecoderBlock(
-              d_model,
-              d_ff,
-              d_per_head,
-              d_per_head,
-              n_heads,
-              layer_attn_type,
-              dropout,
-              ff_activation,
-              dropout,
-              ff_use_sru=0,
-              ff_chunk_size=0,
-              ff_sparsity=0,
-              attention_chunk_size=0,
-              mode=mode))
-
-    return [
-        tl.Dup(),
-        tl.ReversibleSerial(decoder_blocks),
-        tl.Concatenate(),
-        tl.LayerNorm(),
-        tl.Dense(d_model) if dense else [],
-    ]
-
-  pre_decoder_blocks = create_reformer_blocks(
-      n_pre_decoder_blocks, layer_chunk_len=vanilla_chunk_len)
-
-  relative_decoder_blocks = create_reformer_blocks(
-      n_rel_layers,
-      total_kv_pooling=shorten_factor,
-      layer_chunk_len=rel_chunk_len,
-      force_relative=True)
-
-  conv_layer = tl.Serial(
-      tl.CausalConv(d_model, shorten_factor),
-      ff_activation()
-  )
-
-  post_decoder_blocks = create_reformer_blocks(
-      n_post_decoder_blocks, layer_chunk_len=vanilla_chunk_len, dense=False)
-
-  cacher = RelformerCacher(
-      total_kv_pooling=shorten_factor,
-      n_raw_tokens_generated=n_raw_tokens_generated,
-      max_inference_length=max_len,
-      shift=shorten_factor - 1,
-      mode=mode)
-
-  picker = RelformerPicker(
-      total_kv_pooling=shorten_factor,
-      n_raw_tokens_generated=n_raw_tokens_generated,
-      mode=mode)
-
-  cacher_conv = RelformerCacher(
-      total_kv_pooling=shorten_factor,
-      n_raw_tokens_generated=n_raw_tokens_generated,
-      max_inference_length=max_len,
-      shift=shorten_factor - 1,
-      sliding=True,
-      mode=mode)
-
-  picker_conv = PickLastTokenInPredict(mode=mode)
-
-  # Assemble and return the model.
-  return tl.Serial(  # tokens (or chunked tuple of tokens)
-      tl.ShiftRight(mode=mode),  # toks
-      token_encoder,  # vecs
-      positional_encoder,
-      pre_decoder_blocks,  # vecs
-      tl.Dup(),
-      cacher,
-      tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
-      _DownsamplerLM(shorten_factor, d_model),
-      relative_decoder_blocks,
-      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
-      _UpsamplerLM(shorten_factor, d_model),
-      tl.LayerNorm(),
-      picker,
-      tl.Concatenate(),
-      cacher_conv,
-      conv_layer,
-      picker_conv,
-      post_decoder_blocks,
-      tl.Dense(vocab_size),  # vecs
   )
