@@ -87,11 +87,5 @@ Quality = model_configure(rl.Quality)
 RNNLM = model_configure(rnn.RNNLM)
 GRULM = model_configure(rnn.GRULM)
 LSTMSeq2SeqAttn = model_configure(rnn.LSTMSeq2SeqAttn)
-FunnelTransformerEncoder = model_configure(
-    funnel_transformer.FunnelTransformerEncoder)
-FunnelTransformer = model_configure(
-    funnel_transformer.FunnelTransformer)
 ResidualShuffleExchange = model_configure(rse.ResidualShuffleExchange)
-FunnelTransformerLM = model_configure(
-    funnel_transformer.FunnelTransformerLM)
 RelformerLM = model_configure(funnel_transformer.RelformerLM)
