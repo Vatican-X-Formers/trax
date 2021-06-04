@@ -160,6 +160,7 @@ def RelformerLM(vocab_size,
 
   if n_rel_layers > 0:
     funnel_part_of_model = [
+        tl.Dup(),
         tl.ShiftRight(n_positions=shorten_factor - 1, mode=mode),
         _DownsamplerLM(shorten_factor, d_model),
         relative_decoder_blocks,
