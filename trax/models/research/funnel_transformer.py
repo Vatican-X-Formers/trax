@@ -619,49 +619,12 @@ def FunnelTransformerLM(vocab_size,
         for _ in range(n_layers)]
     return decoder_blocks + [tl.LayerNorm()]
 
-  total_pooling_acc = 1
-  pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
-                                             total_pooling_acc)
-
-  funnel_blocks = []
-
-  for shorten_factor, block_len in zip(shorten_factors, n_funnel_blocks):
-    funnel_blocks = funnel_blocks + [_FunnelRelativeDecoderBlock(
-        d_model, d_ff, n_heads, dropout,
-        dropout_shared_axes, mode,
-        ff_activation,
-        context_bias_layer=context_bias_layer,
-        location_bias_layer=location_bias_layer,
-        total_pooling=total_pooling_acc,
-        shorten_factor=shorten_factor,
-        is_upsampling=False)]
-    total_pooling_acc *= shorten_factor
-    funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
-                                                          total_pooling_acc)
-
-  upsampling_layer = _FunnelRelativeDecoderBlock(
-      d_model, d_ff, n_heads, dropout,
-      dropout_shared_axes, mode,
-      ff_activation,
-      context_bias_layer=context_bias_layer,
-      location_bias_layer=location_bias_layer,
-      total_pooling=total_pooling_acc,
-      shorten_factor=total_pooling_acc,
-      is_upsampling=True)
-
-  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
+  decoder_blocks = create_decoder_blocks(n_funnel_blocks[0], total_pooling=1)
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
       tl.ShiftRight(mode=mode),  # toks
       token_encoder,             # vecs
-      pre_decoder_blocks,        # vecs
-      tl.Dup(),
-      tl.ShiftRight(n_positions=total_pooling_acc - 1),
-      funnel_blocks,
-      upsampling_layer,
-      tl.LayerNorm(),
-      tl.Add(),
-      post_decoder_blocks,
+      decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
