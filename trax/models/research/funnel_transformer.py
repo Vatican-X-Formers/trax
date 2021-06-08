@@ -639,15 +639,14 @@ def FunnelTransformerLM(vocab_size,
         for _ in range(n_layers)]
     return decoder_blocks + [tl.LayerNorm()]
 
-  total_pooling_acc = 1
-  pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
-                                             total_pooling_acc)
+  pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks, 1)
+  total_pooling_acc = shorten_factors[0]
 
   mid_decoder_blocks = create_decoder_blocks(n_funnel_blocks[0],
-                                             total_pooling=shorten_factors[0])
+                                             total_pooling=total_pooling_acc)
 
-  pooling_layer = _DownsamplerLM(shorten_factors[0], d_model)
-  upsampling_layer = _UpsamplerLM(shorten_factors[0], d_model)
+  pooling_layer = _DownsamplerLM(total_pooling_acc, d_model)
+  upsampling_layer = _UpsamplerLM(total_pooling_acc, d_model)
 
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
 
