@@ -521,8 +521,29 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
-  pooling = tl.AvgPool(pool_size=(shorten_factor,), strides=(shorten_factor,)) \
-    if not is_upsampling else []
+  pooling = tl.AvgPool(pool_size=(shorten_factor,), strides=(shorten_factor,))\
+      if not is_upsampling else []
+
+  upsampler = [
+      tl.Fn('Upsample', lambda x: x[
+                                  ..., :x.shape[2] - x.shape[
+        2] % shorten_factor].reshape(
+          x.shape[0],
+          shorten_factor * x.shape[1],
+          x.shape[2] // shorten_factor)
+            )
+      if is_upsampling else [],
+
+      tl.Select([0, 1, 1]),  # h', h, h
+      attention,
+      dropout_,
+  ]
+
+  sony = tl.Residual(
+          tl.Select([0, 1, 1]),  # h', h, h
+          attention,
+          dropout_,
+      )
 
   return [
       tl.LayerNorm(),            # h
@@ -530,12 +551,7 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
           pooling,
           tl.LayerNorm(),
       ), None),                  # h', h
-      tl.Select([2, 1, 2]) if is_upsampling else [],
-      tl.Residual(
-          tl.Select([0, 1, 1]),  # h', h, h
-          attention,
-          dropout_,
-      ),
+      upsampler if is_upsampling else sony,
       tl.Residual(
           feed_forward
       ),
