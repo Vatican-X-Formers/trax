@@ -26,6 +26,8 @@ from trax.layers import core
 from trax.layers import initializers as init
 from trax.layers.assert_shape import assert_shape
 from trax.layers.research.rel_attention import RelativeAttentionLMLayer
+from trax.models.reformer.reformer import DecoderBlock
+from trax.models.research.configurable_transformer import PositionalEncoder
 from trax.models.transformer import _EncoderBlock
 from trax.models.transformer import _FeedForwardBlock
 
@@ -167,7 +169,9 @@ def _FunnelBlock(d_model, d_ff, n_heads,
           hidden_dropout                            # attn, mask'
       ),                                            # funnel_activations, mask'
       tl.Residual(
-          feed_forward
+          tl.LayerNorm(),
+          feed_forward,
+          hidden_dropout,
       )
   ]
 
@@ -413,8 +417,8 @@ def FunnelTransformer(vocab_size,
   )
 
 
-def _get_rel_att_inputs(d_model, n_heads):
-  # Global relative attentions bias initialization shared across the layers
+def _get_rel_att_inputs(d_model, n_heads):  # pylint: disable=invalid-name
+  """Global relative attentions bias initialization shared across the layers."""
   assert d_model % n_heads == 0 and d_model % 2 == 0
   d_head = d_model // n_heads
 
@@ -430,9 +434,11 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
                           mode, ff_activation, context_bias_layer,
                           location_bias_layer, total_pooling):
   """Returns a list of layers that implements a Transformer encoder block.
+
   The input to the block is a pair, (activations, mask), where the mask was
   created from the original source tokens to prevent attending to the padding
   part of the input.
+
   Args:
     d_model: Final dimension of tensors at most points in the model, including
         the initial embedding output.
@@ -451,6 +457,7 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
     context_bias_layer: Global context bias from Transformer XL's attention.
     location_bias_layer: Global location bias from Transformer XL's attention.
     total_pooling: The combined pool size of previously used funnel blocks.
+
   Returns:
     A list of layers that maps (activations, att_vecs, mask) to
                                (activations, att_vecs, mask).
@@ -479,37 +486,63 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
   ]
 
 
+def _UpsamplerLM(shorten_factor, d_model):
+  return tl.Serial(
+      tl.Dense(shorten_factor * d_model),
+      tl.Fn(
+          'ProlongBack',
+          lambda x: jnp.reshape(  # Prolong back.  # pylint: disable=g-long-lambda
+              x, (x.shape[0], x.shape[1] * shorten_factor, -1)),
+          n_out=1),
+  )
+
+
+def _DownsamplerLM(shorten_factor, d_model):
+  return tl.Serial(
+      tl.Fn(
+          'Shorten',
+          lambda x: jnp.reshape(  # Shorten -- move to depth.  # pylint: disable=g-long-lambda
+              x, (x.shape[0], x.shape[1] // shorten_factor, -1)),
+          n_out=1),
+      tl.Dense(d_model))
+
+
 def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes, mode, ff_activation,
                                 context_bias_layer, location_bias_layer,
-                                total_pooling, shorten_factor, is_upsampling):
+                                total_pooling, shorten_factor, resampler_fn):
   """Returns a list of layers that implements a Transformer decoder block.
 
   The input is an activation tensor.
 
   Args:
     d_model: Final dimension of tensors at most points in the model, including
-        the initial embedding output.
+      the initial embedding output.
     d_ff: Size of special dense layer in the feed-forward part of each block.
     n_heads: Number of attention heads.
     dropout: Stochastic rate (probability) for dropping an activation value
-        when applying dropout within a block.
+      when applying dropout within a block.
     dropout_shared_axes: Tensor axes on which to share a dropout mask.
-        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
-        a useful way to save memory and apply consistent masks to activation
-        vectors at different sequence positions.
+      Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+      a useful way to save memory and apply consistent masks to activation
+      vectors at different sequence positions.
     mode: If `'train'`, each block will include dropout; else, it will
-        pass all values through unaltered.
+      pass all values through unaltered.
     ff_activation: Type of activation function at the end of each block; must
-        be an activation-type subclass of `Layer`.
+      be an activation-type subclass of `Layer`.
+    context_bias_layer: context bias layer.
+    location_bias_layer: location bias layer.
+    total_pooling: total pooling.
     shorten_factor: by how much shorten/upsample at this funnel block.
     resampler_fn: Type of function that performs funnel upsampling/downsampling;
-        callable with signature: shorten_factor, d_model;  must return an
-         activation-type subclass of `Layer`.
+      callable with signature: shorten_factor, d_model;  must return an
+      activation-type subclass of `Layer`.
 
   Returns:
     A list of layers that maps an activation tensor to an activation tensor.
   """
+  resampler = resampler_fn(shorten_factor, d_model)
+
   attention = RelativeAttentionLMLayer(
       d_model, context_bias_layer, location_bias_layer,
       total_pooling, n_heads=n_heads, dropout=dropout,
@@ -521,16 +554,12 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
-  pooling = tl.AvgPool(pool_size=(shorten_factor,), strides=(shorten_factor,)) \
-    if not is_upsampling else []
-
   return [
       tl.LayerNorm(),            # h
       tl.Branch(tl.Serial(
-          pooling,
+          resampler,
           tl.LayerNorm(),
       ), None),                  # h', h
-      tl.Select([2, 1, 2]) if is_upsampling else [],
       tl.Residual(
           tl.Select([0, 1, 1]),  # h', h, h
           attention,
@@ -576,21 +605,20 @@ def FunnelTransformerLM(vocab_size,
         the initial embedding output.
     d_ff: Size of special dense layer in the feed-forward part of each encoder
         block.
-    n_heads: Number of attention heads.
     vanilla_layers: (pre_layers, post_layers) tuple - number of full token-level
         Transformer decoder layers before and after shortening.
     shorten_factors: by how much to shorten at each step - tuple of arbitrary
-        length denoting by how much shorten at each pooling stage
+        length denoting by how much shorten at each pooling stage.
     n_funnel_blocks: number of Transformer decoder blocks after each stage of
-        pooling - tuple of the same length as `shorten_factors`
+        pooling - tuple of the same length as `shorten_factors`.
+    n_heads: Number of attention heads.
     dropout: Stochastic rate (probability) for dropping an activation value
         when applying dropout within an encoder block.
     dropout_shared_axes: Tensor axes on which to share a dropout mask.
         Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
         a useful way to save memory and apply consistent masks to activation
         vectors at different sequence positions.
-    mode: If `'predict'`, use fast inference. If `'train'`, each encoder block
-        will include dropout; else, it will pass all values through unaltered.
+    mode: str: 'train' or 'eval'.
     ff_activation: Type of activation function at the end of each encoder
         block; must be an activation-type subclass of `Layer`.
 
@@ -598,6 +626,7 @@ def FunnelTransformerLM(vocab_size,
     A Transformer language model as a layer that maps from a tensor of tokens
     to activations over a vocab set.
   """
+  assert mode != 'predict'  # For now, 'predict' mode is unsupported.
   assert len(n_funnel_blocks) == len(shorten_factors)
 
   token_encoder = [
@@ -609,7 +638,7 @@ def FunnelTransformerLM(vocab_size,
 
   n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
 
-  def create_decoder_blocks(n_layers, total_pooling):
+  def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
     decoder_blocks = [
         # pylint: disable=g-complex-comprehension
         _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
@@ -621,7 +650,7 @@ def FunnelTransformerLM(vocab_size,
 
   total_pooling_acc = 1
   pre_decoder_blocks = create_decoder_blocks(n_pre_decoder_blocks,
-                                             total_pooling_acc)
+                                             total_pooling=1)
 
   funnel_blocks = []
 
@@ -634,7 +663,7 @@ def FunnelTransformerLM(vocab_size,
         location_bias_layer=location_bias_layer,
         total_pooling=total_pooling_acc,
         shorten_factor=shorten_factor,
-        is_upsampling=False)]
+        resampler_fn=_DownsamplerLM)]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
@@ -647,9 +676,15 @@ def FunnelTransformerLM(vocab_size,
       location_bias_layer=location_bias_layer,
       total_pooling=total_pooling_acc,
       shorten_factor=total_pooling_acc,
-      is_upsampling=True)
+      resampler_fn=_UpsamplerLM)
 
-  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
+  conv_layer = tl.Serial(
+      tl.CausalConv(d_model, total_pooling_acc),
+      ff_activation()
+  )
+
+  post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks,
+                                              total_pooling=1)
 
   # Assemble and return the model.
   return tl.Serial(              # tokens (or chunked tuple of tokens)
@@ -659,9 +694,149 @@ def FunnelTransformerLM(vocab_size,
       tl.Dup(),
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
       funnel_blocks,
+      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
       upsampling_layer,
       tl.LayerNorm(),
-      tl.Add(),
+      tl.Concatenate(),
+      conv_layer,
+      post_decoder_blocks,
+      tl.Dense(vocab_size),      # vecs
+  )
+
+
+def RelformerLM(vocab_size,
+                d_model=512,
+                d_ff=2048,
+                vanilla_layers=(1, 1),
+                shorten_factor=3,
+                n_rel_layers=6,
+                n_heads=8,
+                dropout=0.1,
+                dropout_shared_axes=None,
+                vanilla_attn_type=tl.LSHSelfAttention,
+                pos_type='fixed-base',
+                max_len=3072,
+                mode='train',
+                ff_activation=tl.FastGelu):
+  """Returns a Transformer language model.
+
+  This model performs autoregressive language modeling:
+
+    - input: rank 2 tensor representing a batch of text strings via token IDs
+      plus padding markers; shape is (batch_size, sequence_length). The tensor
+      elements are integers in `range(vocab_size)`, and `0` values mark padding
+      positions.
+
+    - output: rank 3 tensor representing a batch of log-probability
+      distributions for each sequence position over possible token IDs;
+      shape is (batch_size, sequence_length, `vocab_size`).
+
+  This model uses only the decoder part of the overall Transformer.
+
+  Args:
+    vocab_size: Input vocabulary size -- each element of the input tensor
+        should be an integer in `range(vocab_size)`. These integers typically
+        represent token IDs from a vocabulary-based tokenizer.
+    d_model: Final dimension of tensors at most points in the model, including
+        the initial embedding output.
+    d_ff: Size of special dense layer in the feed-forward part of each encoder
+        block.
+    vanilla_layers: (pre_layers, post_layers) tuple - number of full token-level
+        Transformer decoder layers before and after shortening.
+    shorten_factor: by how much to shorten
+    n_rel_layers: number of Transformer blocks after the pooling. These blocks
+        use relative attention.
+    n_heads: Number of attention heads.
+    dropout: Stochastic rate (probability) for dropping an activation value
+        when applying dropout within an encoder block.
+    dropout_shared_axes: Tensor axes on which to share a dropout mask.
+        Sharing along batch and sequence axes (`dropout_shared_axes=(0,1)`) is
+        a useful way to save memory and apply consistent masks to activation
+        vectors at different sequence positions.
+    vanilla_attn_type: class: attention class such as SelfAttention to use in
+        the layers before and after shortening (vanilla layers).
+    pos_type: string, the type of positional embeddings to use.
+    max_len: int: maximum symbol length for positional encoding
+    mode: str: 'train' or 'eval'.
+    ff_activation: Type of activation function at the end of each encoder
+        block; must be an activation-type subclass of `Layer`.
+
+  Returns:
+    A Transformer language model as a layer that maps from a tensor of tokens
+    to activations over a vocab set.
+  """
+  assert mode != 'predict'  # For now, 'predict' mode is unsupported.
+
+  token_encoder = [
+      tl.Embedding(vocab_size, d_model),
+      tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)]
+
+  positional_encoder = PositionalEncoder(mode, dropout, max_len, pos_type)
+
+  n_pre_decoder_blocks, n_post_decoder_blocks = vanilla_layers
+
+  def create_decoder_blocks(n_layers, total_pooling):  # pylint: disable=invalid-name
+    context_bias_layer, location_bias_layer = _get_rel_att_inputs(d_model,
+                                                                  n_heads)
+    decoder_blocks = [
+        # pylint: disable=g-complex-comprehension
+        _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
+                              dropout_shared_axes, mode, ff_activation,
+                              context_bias_layer, location_bias_layer,
+                              total_pooling)
+        for _ in range(n_layers)]
+    return decoder_blocks + [tl.LayerNorm()]
+
+  def create_reformer_blocks(n_layers, dense=True):  # pylint: disable=invalid-name
+    if n_layers == 0:
+      return [tl.LayerNorm()]
+    d_per_head = d_model // n_heads
+    decoder_blocks = [
+        DecoderBlock(d_model, d_ff, d_per_head, d_per_head, n_heads,  # pylint: disable=g-complex-comprehension
+                     vanilla_attn_type,
+                     dropout, ff_activation, dropout,
+                     ff_use_sru=0,
+                     ff_chunk_size=0,
+                     ff_sparsity=0,
+                     attention_chunk_size=0,
+                     mode=mode)
+        for _ in range(n_layers)]
+
+    return [
+        tl.Dup(),
+        tl.ReversibleSerial(decoder_blocks),
+        tl.Concatenate(),
+        tl.LayerNorm(),
+        tl.Dense(d_model) if dense else [],
+    ]
+
+  pre_decoder_blocks = create_reformer_blocks(n_pre_decoder_blocks, dense=True)
+
+  relative_decoder_blocks = create_decoder_blocks(n_rel_layers, shorten_factor)
+
+  conv_layer = tl.Serial(
+      tl.CausalConv(d_model, shorten_factor),
+      ff_activation()
+  )
+
+  post_decoder_blocks = create_reformer_blocks(n_post_decoder_blocks,
+                                               dense=False)
+
+  # Assemble and return the model.
+  return tl.Serial(              # tokens (or chunked tuple of tokens)
+      tl.ShiftRight(mode=mode),  # toks
+      token_encoder,             # vecs
+      positional_encoder,
+      pre_decoder_blocks,        # vecs
+      tl.Dup(),
+      tl.ShiftRight(n_positions=shorten_factor - 1),
+      _DownsamplerLM(shorten_factor, d_model),
+      relative_decoder_blocks,
+      tl.Dropout(rate=dropout, shared_axes=[-2], mode=mode),
+      _UpsamplerLM(shorten_factor, d_model),
+      tl.LayerNorm(),
+      tl.Concatenate(),
+      conv_layer,
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
