@@ -114,6 +114,7 @@ def ReformerLM(vocab_size,
                loss_d_lowrank=0,
                loss_sparsity_prob=None,
                attention_chunk_size=0,
+               attn_layers_per_block=2,
                mode='train'):
   """Reversible transformer language model (only uses a decoder, no encoder).
 
@@ -176,6 +177,7 @@ def ReformerLM(vocab_size,
         ff_chunk_size=ff_chunk_size,
         ff_sparsity=ff_sparsity,
         attention_chunk_size=attention_chunk_size,
+        n_attention_layers=attn_layers_per_block,
         mode=mode)
     decoder_blocks.append(decoder_block)
 
