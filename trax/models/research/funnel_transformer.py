@@ -962,6 +962,7 @@ def RelformerLM(vocab_size,
               ff_chunk_size=0,
               ff_sparsity=0,
               attention_chunk_size=0,
+              n_attention_layers=2,
               mode=mode))
 
     return [
