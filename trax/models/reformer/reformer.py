@@ -88,8 +88,7 @@ def DecoderBlock(d_model, d_ff, d_attention_key, d_attention_value,
         tl.ReversibleSwap()
     ]
 
-  return ([_attention_half_residual() for _ in range(n_attention_layers)]
-          + [_feed_forward() for _ in range(n_feedforward_layers)])
+  return [_feed_forward(), _attention_half_residual(), _feed_forward()]
 
 
 def ReformerLM(vocab_size,
