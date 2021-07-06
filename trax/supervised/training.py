@@ -60,6 +60,7 @@ from trax.data import inputs
 from trax.fastmath import numpy as jnp
 from trax.fastmath import random as jax_random
 from trax.layers import base
+from trax.neptuneboard import NeptuneRunWrapper, SummaryWriterWithNeptune
 from trax.supervised import history as trax_history
 
 
@@ -997,10 +998,15 @@ class Loop:
     """
     if self._output_dir is not None:
       _log(f'Metrics will be written in {self._output_dir}.', stdout=False)
-      train_writers = [jaxboard.SummaryWriter(os.path.join(output_dir, 'train'))
-                       for output_dir in self._output_dir_per_train_task]
-      eval_writers = [jaxboard.SummaryWriter(os.path.join(output_dir, 'eval'))
-                      for output_dir in self._output_dir_per_eval_task]
+      neptune_wrapper = NeptuneRunWrapper()
+      train_writers = [
+          SummaryWriterWithNeptune(os.path.join(output_dir, 'train'),
+                                   neptune_wrapper=neptune_wrapper)
+          for output_dir in self._output_dir_per_train_task]
+      eval_writers = [
+          SummaryWriterWithNeptune(os.path.join(output_dir, 'eval'),
+                                   neptune_wrapper=neptune_wrapper)
+          for output_dir in self._output_dir_per_eval_task]
       try:
         yield (train_writers, eval_writers)
       finally:
