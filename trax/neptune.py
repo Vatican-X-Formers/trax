@@ -39,7 +39,7 @@ class NeptuneRunWrapper:
     self._run = neptune.init(project=neptune_project,
                              api_token=os.environ['NEPTUNE_TOKEN'])
 
-    self._run['BRANCH'] = os.environ['BRANCH']
+    self._run['TRAX_BRANCH'] = os.environ['TRAX_BRANCH']
     self._run['gin_config'] = gin.operative_config_str()
     self._run['parameters'] = gin.config._CONFIG
 
