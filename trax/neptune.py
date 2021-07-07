@@ -37,7 +37,11 @@ class NeptuneRunWrapper:
   def __init__(self):
     neptune_project = os.environ['NEPTUNE_PROJECT']
     self._run = neptune.init(project=neptune_project,
-                             api_token=os.environ['NEPTUNE_TOKEN'])
+                             api_token=os.environ['NEPTUNE_TOKEN'],
+                             source_files=['**/funnel_transformer.py',
+                                           '**/rel_attention.py',
+                                           '**/reformer.py',
+                                           '**/configurable_transformer.py'])
 
     self._run['TRAX_BRANCH'] = os.environ['TRAX_BRANCH']
     self._run['gin_config'] = gin.operative_config_str()
