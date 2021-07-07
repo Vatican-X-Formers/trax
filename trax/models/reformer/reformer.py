@@ -81,9 +81,12 @@ def DecoderBlock(d_model, d_ff, d_attention_key, d_attention_value,
         tl.ReversibleSwap()
     ]
 
+  def _Halve():
+    return tl.Fn('Halve', lambda x: x / 2, n_out=1)
+
   def _feed_forward():
     return [
-        tl.ReversibleHalfResidual(_FF(),
+        tl.ReversibleHalfResidual(tl.ReversibleSerial(_FF(), _Halve()),
                                   name='ReversibleHalfResidualDecoderFF'),
         tl.ReversibleSwap()
     ]
