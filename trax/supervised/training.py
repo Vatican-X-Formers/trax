@@ -53,7 +53,6 @@ import tensorflow as tf
 
 from trax import fastmath
 from trax import jaxboard
-from trax import neptune
 from trax import layers as tl
 from trax import optimizers
 from trax import shapes
@@ -61,7 +60,7 @@ from trax.data import inputs
 from trax.fastmath import numpy as jnp
 from trax.fastmath import random as jax_random
 from trax.layers import base
-from trax.neptune import NeptuneRunWrapper
+from trax.neptuneboard import NeptuneRunWrapper, SummaryWriterWithNeptune
 from trax.supervised import history as trax_history
 
 
@@ -1001,12 +1000,12 @@ class Loop:
       _log(f'Metrics will be written in {self._output_dir}.', stdout=False)
       neptune_wrapper = NeptuneRunWrapper()
       train_writers = [
-          neptune.SummaryWriterWithNeptune(os.path.join(output_dir, 'train'),
-                                           neptune_run=neptune_wrapper)
+          SummaryWriterWithNeptune(os.path.join(output_dir, 'train'),
+                                   neptune_wrapper=neptune_wrapper)
           for output_dir in self._output_dir_per_train_task]
       eval_writers = [
-          neptune.SummaryWriterWithNeptune(os.path.join(output_dir, 'eval'),
-                                           neptune_run=neptune_wrapper)
+          SummaryWriterWithNeptune(os.path.join(output_dir, 'eval'),
+                                   neptune_wrapper=neptune_wrapper)
           for output_dir in self._output_dir_per_eval_task]
       try:
         yield (train_writers, eval_writers)

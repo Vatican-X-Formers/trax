@@ -29,33 +29,38 @@ from trax.jaxboard import SummaryWriter
 with warnings.catch_warnings():
   warnings.simplefilter('ignore')
   mpl.use('Agg')
-# pylint: disable=g-import-not-at-top
-import neptune.new as neptune
 
 
+@gin.configurable
 class NeptuneRunWrapper:
-  def __init__(self):
-    neptune_project = os.environ['NEPTUNE_PROJECT']
-    self._run = neptune.init(project=neptune_project,
-                             api_token=os.environ['NEPTUNE_TOKEN'],
-                             source_files=['**/funnel_transformer.py',
-                                           '**/rel_attention.py',
-                                           '**/reformer.py',
-                                           '**/configurable_transformer.py'])
+  def __init__(self, enabled=True):
+    self._enabled = enabled
 
-    self._run['TRAX_BRANCH'] = os.environ['TRAX_BRANCH']
-    self._run['gin_config'] = gin.operative_config_str()
-    self._run['parameters'] = gin.config._CONFIG
+    if self._enabled:
+      import neptune.new as neptune
+
+      neptune_project = os.environ['NEPTUNE_PROJECT']
+      self._run = neptune.init(project=neptune_project,
+                               api_token=os.environ['NEPTUNE_TOKEN'],
+                               source_files=['**/funnel_transformer.py',
+                                             '**/rel_attention.py',
+                                             '**/reformer.py',
+                                             '**/configurable_transformer.py'])
+
+      self._run['TRAX_BRANCH'] = os.environ['TRAX_BRANCH']
+      self._run['gin_config'] = gin.operative_config_str()
+      self._run['parameters'] = gin.config._CONFIG
 
   def log_value(self, tag, value, step):
-    self._run[tag].log(value)
+    if self._enabled:
+      self._run[tag].log(value)
 
 
 class SummaryWriterWithNeptune(SummaryWriter):
   """Saves data in event and summary protos for tensorboard."""
 
   def __init__(self, log_dir, enable=True,
-               neptune_run: NeptuneRunWrapper = None):
+               neptune_wrapper: NeptuneRunWrapper = None):
     """Create a new SummaryWriter.
 
     Args:
@@ -64,7 +69,7 @@ class SummaryWriterWithNeptune(SummaryWriter):
         multihost training.
     """
     super().__init__(log_dir, enable)
-    self._neptune_run = neptune_run
+    self._neptune_wrapper = neptune_wrapper
 
   def scalar(self, tag, value, step=None):
     """Saves scalar value.
@@ -75,4 +80,4 @@ class SummaryWriterWithNeptune(SummaryWriter):
       step: int: training step
     """
     super().scalar(tag, value, step)
-    self._neptune_run.log_value(tag, value, step)
+    self._neptune_wrapper.log_value(tag, value, step)
