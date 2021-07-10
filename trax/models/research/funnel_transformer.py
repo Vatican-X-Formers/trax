@@ -469,7 +469,6 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
   return [
       tl.Residual(               # vecs
           tl.LayerNorm(),
-          tl.Select([0, 0, 0]),
           attention,
           dropout_,
       ),                         # vecs
