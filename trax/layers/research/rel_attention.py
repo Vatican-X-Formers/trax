@@ -315,23 +315,13 @@ def _fast_matrix_shift(x, funnel_factor, is_upsampling=False):
   """
   #  shift: i-th row is shifted by i * shift elements to the left
   #  k: after shift, we pick every kth element
-
-  if is_upsampling is True:
-    k = funnel_factor
-    shift = 1
-  else:
-    k = 1
-    shift = funnel_factor
-
-  bsz, n_head = x.shape[0], x.shape[1]
-  qlen, klen = x.shape[2], (x.shape[3] + 1) // 2
-
-  zero_pad = jnp.zeros((bsz, n_head, qlen, shift))
+  shift = 1
+  batch_size, n_head = x.shape[0], x.shape[1]
+  queries_len, keys_len = x.shape[2], x.shape[3]
+  zero_pad = jnp.zeros((batch_size, n_head, queries_len, shift))
   x = jnp.concatenate([zero_pad, x], axis=3)
-  x = x.reshape(bsz, n_head, 2 * klen - 1 + shift, qlen)
+  x = x.reshape(batch_size, n_head, keys_len + shift, queries_len)
   x = x[:, :, shift:, :]
-  x = x.reshape(bsz, n_head, qlen, klen * 2 - 1)
-  x = x[:, :, :, shift - 1: shift - 1 + klen: k]
   return x
 
 
