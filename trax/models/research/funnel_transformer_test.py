@@ -120,42 +120,20 @@ class FunnelTransformerTest(parameterized.TestCase):
     self.assertEqual(y.shape, (batch_size, n_tokens, vocab_size))
 
   def test_funnel_transformer_lm_forward_shape(self):
-    d_model = 16
+    d_model = 8
     vocab_size = 7
-    length = 48
-    batch_size = 3
-    x = np.ones((batch_size, length)).astype(np.int32)
+    x = np.ones((3, 6)).astype(np.int32)
 
-    model_chunked = ft.RelformerLM(
+    simple_funnel = ft.FunnelTransformerLM(
         vocab_size,
-        shorten_factor=3,
-        n_rel_layers=3,
+        shorten_factors=(3,),
+        n_funnel_blocks=(1,),
         vanilla_layers=(1, 1),
-        d_model=d_model,
-        d_ff=d_model,
-        n_heads=2,
-        vanilla_attn_type=tl.SelfAttention,
-        rel_chunk_len=4,
-        vanilla_chunk_len=2,
-        max_len=48)
-    _, _ = model_chunked.init(shapes.signature(x))
-    y = model_chunked(x)
-    self.assertEqual(y.shape, (batch_size, length, vocab_size))
-
-    model_without_chunks = ft.RelformerLM(
-        vocab_size,
-        shorten_factor=3,
-        n_rel_layers=3,
-        vanilla_layers=(1, 1),
-        d_model=d_model,
-        d_ff=d_model,
-        n_heads=2,
-        vanilla_attn_type=tl.SelfAttention,
-        max_len=48)
-
-    _, _ = model_without_chunks.init(shapes.signature(x))
-    y = model_without_chunks(x)
-    self.assertEqual(y.shape, (batch_size, length, vocab_size))
+        d_model=d_model, d_ff=d_model, n_heads=2
+    )
+    _, _ = simple_funnel.init(shapes.signature(x))
+    y = simple_funnel(x)
+    self.assertEqual(y.shape, (3, 6, vocab_size))
 
   def test_funnel_transformer_lm_autoregressive_property(self):
     input_shape = (1, 12)

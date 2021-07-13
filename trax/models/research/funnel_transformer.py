@@ -482,7 +482,7 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
 def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
                                 dropout_shared_axes, mode, ff_activation,
                                 context_bias_layer, location_bias_layer,
-                                total_pooling, shorten_factor, is_upsampling):
+                                total_pooling, shorten_factor):
   """Returns a list of layers that implements a Transformer decoder block.
 
   The input is an activation tensor.
@@ -521,8 +521,7 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
   dropout_ = tl.Dropout(
       rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
-  pooling = tl.AvgPool(pool_size=(shorten_factor,), strides=(shorten_factor,)) \
-    if not is_upsampling else []
+  pooling = tl.AvgPool(pool_size=(shorten_factor,), strides=(shorten_factor,))
 
   return [
       tl.LayerNorm(),            # h
@@ -530,7 +529,6 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
           pooling,
           tl.LayerNorm(),
       ), None),                  # h', h
-      tl.Select([2, 1, 2]) if is_upsampling else [],
       tl.Residual(
           tl.Select([0, 1, 1]),  # h', h, h
           attention,
@@ -541,6 +539,49 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
       ),
   ]
 
+
+def _UpsamplerLM(shorten_factor, d_model):
+  return tl.Serial(
+      tl.Dense(shorten_factor * d_model),
+      tl.Fn(
+          'ProlongBack',
+          lambda x: jnp.reshape(
+              # Prolong back.  # pylint: disable=g-long-lambda
+              x, (x.shape[0], x.shape[1] * shorten_factor, -1)),
+          n_out=1),
+  )
+
+def _UpsamplingDecoderBlock(d_model, d_ff, n_heads, dropout,
+                            dropout_shared_axes, mode, ff_activation,
+                            context_bias_layer, location_bias_layer,
+                            total_pooling, shorten_factor):
+
+  attention = RelativeAttentionLMLayer(
+      d_model, context_bias_layer, location_bias_layer,
+      total_pooling, n_heads=n_heads, dropout=dropout,
+      mode=mode)
+
+  feed_forward = _FeedForwardBlock(
+      d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
+
+  dropout_ = tl.Dropout(
+      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
+
+  upsampler = _UpsamplerLM(shorten_factor, d_model)
+
+  return [  # Input: downsampled_x, residual_x
+      tl.LayerNorm(),
+      tl.Select([1, 0, 0, 0]),
+      tl.Residual(
+          attention,
+          dropout_,
+      ),
+      tl.Residual(
+          feed_forward
+      ),
+      tl.Parallel(None, upsampler),
+      tl.Add()
+  ]
 
 def FunnelTransformerLM(vocab_size,
                         d_model=512,
@@ -633,21 +674,19 @@ def FunnelTransformerLM(vocab_size,
         context_bias_layer=context_bias_layer,
         location_bias_layer=location_bias_layer,
         total_pooling=total_pooling_acc,
-        shorten_factor=shorten_factor,
-        is_upsampling=False)]
+        shorten_factor=shorten_factor)]
     total_pooling_acc *= shorten_factor
     funnel_blocks = funnel_blocks + create_decoder_blocks(block_len,
                                                           total_pooling_acc)
 
-  upsampling_layer = _FunnelRelativeDecoderBlock(
+  upsampling_layer = _UpsamplingDecoderBlock(
       d_model, d_ff, n_heads, dropout,
       dropout_shared_axes, mode,
       ff_activation,
       context_bias_layer=context_bias_layer,
       location_bias_layer=location_bias_layer,
       total_pooling=total_pooling_acc,
-      shorten_factor=total_pooling_acc,
-      is_upsampling=True)
+      shorten_factor=total_pooling_acc)
 
   post_decoder_blocks = create_decoder_blocks(n_post_decoder_blocks, 1)
 
@@ -660,8 +699,6 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
       funnel_blocks,
       upsampling_layer,
-      tl.LayerNorm(),
-      tl.Add(),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
