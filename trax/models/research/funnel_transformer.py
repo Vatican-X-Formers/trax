@@ -474,6 +474,7 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
           dropout_,
       ),                         # vecs
       tl.Residual(
+          tl.LayerNorm(),
           feed_forward
       ),                         # vecs
   ]
@@ -537,6 +538,7 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
           dropout_,
       ),
       tl.Residual(
+          tl.LayerNorm(),
           feed_forward
       ),
   ]
