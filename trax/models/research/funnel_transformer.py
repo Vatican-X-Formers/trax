@@ -530,7 +530,7 @@ def _FunnelRelativeDecoderBlock(d_model, d_ff, n_heads, dropout,
           pooling,
           tl.LayerNorm(),
       ), None),                  # h', h
-      tl.Select([2, 1, 2]) if is_upsampling else [],
+      tl.Select([2, 1]) if is_upsampling else [],
       tl.Residual(
           tl.Select([0, 1, 1]),  # h', h, h
           attention,
@@ -660,8 +660,6 @@ def FunnelTransformerLM(vocab_size,
       tl.ShiftRight(n_positions=total_pooling_acc - 1),
       funnel_blocks,
       upsampling_layer,
-      tl.LayerNorm(),
-      tl.Add(),
       post_decoder_blocks,
       tl.Dense(vocab_size),      # vecs
   )
