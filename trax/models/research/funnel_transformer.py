@@ -463,19 +463,20 @@ def _RelativeDecoderBlock(d_model, d_ff, n_heads, dropout, dropout_shared_axes,
   feed_forward = _FeedForwardBlock(
       d_model, d_ff, dropout, dropout_shared_axes, mode, ff_activation)
 
-  dropout_ = tl.Dropout(
-      rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
+  def _Dropout():
+    return tl.Dropout(rate=dropout, shared_axes=dropout_shared_axes, mode=mode)
 
   return [
       tl.Residual(               # vecs
           tl.LayerNorm(),
           tl.Select([0, 0, 0]),
           attention,
-          dropout_,
+          _Dropout(),
       ),                         # vecs
       tl.Residual(
           tl.LayerNorm(),
-          feed_forward
+          feed_forward,
+          _Dropout(),
       ),                         # vecs
   ]
 
